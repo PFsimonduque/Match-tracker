@@ -1067,6 +1067,559 @@ const SK = "an_match_v5";
 const loadH = () => { try { return JSON.parse(localStorage.getItem(SK)||"[]"); } catch { return []; } };
 const saveH = r => { try { const h=loadH(); h.unshift({...r,id:Date.now()}); localStorage.setItem(SK,JSON.stringify(h.slice(0,20))); } catch {} };
 
+// ── Accumulated stats engine ────────────────────────────
+const RANGES = ["1-15","16-30","31-45","46-60","61-75","76-90","90+"];
+function getRange(min) {
+  if (min <= 15)  return "1-15";
+  if (min <= 30)  return "16-30";
+  if (min <= 45)  return "31-45";
+  if (min <= 60)  return "46-60";
+  if (min <= 75)  return "61-75";
+  if (min <= 90)  return "76-90";
+  return "90+";
+}
+
+function buildAccumStats(history) {
+  const players = {};
+  const matches = [];
+  const goalRanges = {};
+  RANGES.forEach(r => { goalRanges[r] = { an:0, rival:0 }; });
+
+  const getP = (name, number="", pos="") => {
+    if (!players[name]) players[name] = { name, number, pos, mins:0, goals:0, assists:0, yellows:0, reds:0, appearances:0 };
+    if (number && !players[name].number) players[name].number = number;
+    if (pos    && !players[name].pos)    players[name].pos    = pos;
+    return players[name];
+  };
+
+  [...history].reverse().forEach(h => {
+    const { matchData, score, events, t1Real=45, t2Real=45 } = h;
+    if (!matchData) return;
+
+    matchData.players?.forEach(p => getP(p.name, p.number, p.pos));
+
+    matchData.players?.forEach(p => {
+      const m = calcMins(p.name, p.type, events, t1Real, t2Real);
+      if (m !== null && m > 0) {
+        getP(p.name, p.number, p.pos).mins        += m;
+        getP(p.name, p.number, p.pos).appearances += 1;
+      }
+    });
+
+    events.filter(e=>e.type==="goal").forEach(e => {
+      const r = getRange(e.minute||0);
+      if (e.isOpponent) {
+        goalRanges[r].rival++;
+      } else {
+        goalRanges[r].an++;
+        if (e.player?.name) getP(e.player.name).goals++;
+        if (e.assist?.name) getP(e.assist.name).assists++;
+      }
+    });
+
+    events.filter(e=>e.type==="yellow").forEach(e => { if (e.player?.name) getP(e.player.name).yellows++; });
+    events.filter(e=>e.type==="red"   ).forEach(e => { if (e.player?.name) getP(e.player.name).reds++;    });
+
+    matches.push({
+      rival: matchData.rival, date: matchData.date,
+      tournament: matchData.tournament, jornada: matchData.jornada,
+      scoreAN: score[0], scoreRv: score[1],
+      result: score[0]>score[1]?"W": score[0]<score[1]?"L":"D",
+    });
+  });
+
+  return { players: Object.values(players), matches, goalRanges };
+}
+
+// ── Accumulated PDF ─────────────────────────────────────
+async function generateAccumPDF(history) {
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
+  const PW=210, ML=11, MR=11, MT=10;
+  const CW=PW-ML-MR, HALF=(CW-4)/2;
+
+  const BG=[0,30,0], GREEN=[0,68,0], GBAR=[0,170,68], GLIGHT=[232,245,233];
+  const BLUE=[0,52,102], YELLOW=[255,215,0], RED=[170,0,0];
+  const GRAY=[136,136,136], WHITE=[255,255,255], BLACK=[26,26,26], BORDER=[221,221,221];
+  const GOLD=[180,140,0], SILVER=[120,120,120], BRONZE=[140,80,40];
+
+  const setFill=c=>doc.setFillColor(...c);
+  const setStroke=c=>doc.setDrawColor(...c);
+  const setTxt=c=>doc.setTextColor(...c);
+  const setFont=(s,w="normal")=>{doc.setFontSize(s);doc.setFont("helvetica",w);};
+  const rRect=(x,y,w,h,r,fill=true,stroke=false)=>doc.roundedRect(x,y,w,h,r,r,fill&&stroke?"FD":fill?"F":"S");
+  const secHdr=(rx,ry,w,icon,title)=>{
+    setFill(WHITE);setStroke(BORDER);rRect(rx,ry,w,7,2);
+    setFont(9.5,"bold");setTxt(GREEN);doc.text(`${icon}  ${title}`,rx+4,ry+4.8);
+    setStroke(GLIGHT);doc.setLineWidth(0.4);doc.line(rx+4,ry+7,rx+w-4,ry+7);
+    return ry+8;
+  };
+
+  const anImg = await new Promise(res=>{
+    const img=new Image(); img.crossOrigin="anonymous";
+    img.onload=()=>{const c=document.createElement("canvas");c.width=img.width;c.height=img.height;c.getContext("2d").drawImage(img,0,0);res(c.toDataURL("image/png"));};
+    img.onerror=()=>res(null); img.src=AN_SHIELD;
+  });
+
+  const { players, matches, goalRanges } = buildAccumStats(history);
+  const totalMatches = matches.length;
+  const W=matches.filter(m=>m.result==="W").length;
+  const D=matches.filter(m=>m.result==="D").length;
+  const L=matches.filter(m=>m.result==="L").length;
+  const goalsF=matches.reduce((a,m)=>a+m.scoreAN,0);
+  const goalsA=matches.reduce((a,m)=>a+m.scoreRv,0);
+
+  let y = MT;
+
+  // ── COVER ──────────────────────────────────────────────
+  setFill(BG); rRect(ML,y,CW,36,4);
+  if (anImg) doc.addImage(anImg,"PNG",ML+3,y+3,13,19);
+  setFont(14,"bold"); setTxt([0,204,0]);
+  doc.text("Atlético Nacional", PW/2, y+10, {align:"center"});
+  setFont(10,"normal"); setTxt([180,255,180]);
+  doc.text("Informe Acumulado de Temporada", PW/2, y+16, {align:"center"});
+  // Record pill
+  setFont(9,"bold"); setTxt(WHITE);
+  doc.text(`${totalMatches} PJ  ·  ${W} G  ·  ${D} E  ·  ${L} P  ·  ${goalsF}:${goalsA}`, PW/2, y+24, {align:"center"});
+  setFont(8,"normal"); setTxt([170,170,170]);
+  const lastMatch = matches[matches.length-1];
+  const firstMatch = matches[0];
+  if (firstMatch && lastMatch)
+    doc.text(`${firstMatch.date||""} → ${lastMatch.date||""}`, PW/2, y+31, {align:"center"});
+  y += 40;
+
+  // ── RESULTADOS (tabla compacta) ─────────────────────────
+  let ry = secHdr(ML,y,CW,"📋","Resultados");
+  setFill(WHITE); setStroke(BORDER); doc.rect(ML,y,CW,matches.length*7+10,"FD");
+  // Header
+  setFont(7.5,"bold"); setTxt(GRAY);
+  doc.text("Rival",       ML+5,  ry+2);
+  doc.text("Torneo",      ML+52, ry+2);
+  doc.text("Fecha",       ML+100,ry+2);
+  doc.text("Resultado",   ML+130,ry+2);
+  ry += 5;
+  matches.forEach((m,i)=>{
+    const rowY=ry+i*7;
+    if (i%2===0){ setFill([248,255,248]); doc.rect(ML+1,rowY-2,CW-2,6.5,"F"); }
+    const resColor = m.result==="W"?GREEN: m.result==="L"?RED:GRAY;
+    const resLabel = m.result==="W"?"Victoria": m.result==="L"?"Derrota":"Empate";
+    setFont(8,"normal"); setTxt(BLACK);
+    doc.text(m.rival||"",        ML+5,  rowY+2.5);
+    doc.text(m.tournament||"",   ML+52, rowY+2.5);
+    doc.text(m.date||"",         ML+100,rowY+2.5);
+    setFont(8,"bold"); setTxt(resColor);
+    doc.text(`${m.scoreAN}–${m.scoreRv} ${resLabel}`, ML+130, rowY+2.5);
+    if (i<matches.length-1){ setStroke([238,238,238]); doc.setLineWidth(0.2); doc.line(ML+3,rowY+4.8,ML+CW-3,rowY+4.8); }
+  });
+  y += matches.length*7 + 14;
+
+  // ── MINUTOS JUGADOS (bar chart) ─────────────────────────
+  const sorted_mins = [...players].filter(p=>p.mins>0).sort((a,b)=>b.mins-a.mins);
+  const maxMins = Math.max(...sorted_mins.map(p=>p.mins),1);
+  const n = sorted_mins.length;
+  const chartH=52, CHART_ML=16, chartW=CW-CHART_ML-2;
+  const bw=chartW/n, iw=Math.min(bw*0.58,9);
+  const pb=20, cih=chartH-pb-6;
+  const chartLeft=ML+CHART_ML;
+
+  let mh = secHdr(ML,y,CW,"⏱","Minutos Jugados Acumulados");
+  setFill(WHITE); setStroke(BORDER); doc.rect(ML,y,CW,chartH+12,"FD");
+  const cBaseY = mh+cih;
+  [25,50,100,200,300,500,maxMins].forEach(val=>{
+    if (val>maxMins+10||val<1) return;
+    const lineY=cBaseY-(val/maxMins)*cih;
+    setStroke([224,224,224]); doc.setLineWidth(0.25); doc.line(chartLeft,lineY,chartLeft+chartW-2,lineY);
+    setFont(5.5,"normal"); setTxt(GRAY); doc.text(String(val),chartLeft-1,lineY+1,{align:"right"});
+  });
+  sorted_mins.forEach((p,i)=>{
+    const xc=chartLeft+(i+0.5)*bw, xb=xc-iw/2;
+    const bh=(p.mins/maxMins)*cih;
+    setFill(GLIGHT); doc.rect(xb,cBaseY-cih,iw,cih,"F");
+    setFill(GBAR);   doc.rect(xb,cBaseY-bh,iw,bh,"F");
+    setFont(5.5,"bold"); setTxt(GREEN);
+    doc.text(`${p.mins}'`,xc,cBaseY-bh-1.5,{align:"center"});
+    const num=p.number||"";
+    if(num){ setFill(GBAR); doc.roundedRect(xc-3.5,cBaseY+1.5,7,4.5,1,1,"F"); setFont(5.5,"bold"); setTxt(WHITE); doc.text(num,xc,cBaseY+4.8,{align:"center"}); }
+    const parts=p.name.split(" ");
+    const disp=parts.length>1?`${parts[0][0]}. ${parts[parts.length-1]}`:p.name;
+    setFont(5.5,"bold"); setTxt(BLACK); doc.text(disp,xc,cBaseY+9,{align:"center"});
+  });
+  setStroke(GREEN); doc.setLineWidth(0.7);
+  doc.line(chartLeft,cBaseY,chartLeft+chartW-2,cBaseY);
+  doc.line(chartLeft,cBaseY-cih,chartLeft,cBaseY);
+  y += chartH+16;
+
+  // ── PODIOS (goles + asistencias + tarjetas) ─────────────
+  const allGoals   = [...players].filter(p=>p.goals>0)  .sort((a,b)=>b.goals-a.goals);
+  const allAssists = [...players].filter(p=>p.assists>0).sort((a,b)=>b.assists-a.assists);
+  const allYellows = [...players].filter(p=>p.yellows>0).sort((a,b)=>b.yellows-a.yellows);
+  const allReds    = [...players].filter(p=>p.reds>0)   .sort((a,b)=>b.reds-a.reds);
+
+  const podiumColors = [[180,140,0],[120,120,120],[140,80,40],[100,100,100]];
+  const podiumLabels = ["1°","2°","3°","4°","5°","6°","7°","8°","9°","10°"];
+
+  const drawPodium = (sx,sy,sw,icon,title,data,valKey) => {
+    const rows = Math.max(data.length,1);
+    let py = secHdr(sx,sy,sw,icon,title);
+    setFill(WHITE); setStroke(BORDER); doc.rect(sx,sy,sw,rows*9+10,"FD");
+    if (data.length===0) { setFont(8,"normal"); setTxt(GRAY); doc.text("—",sx+6,py+5); return sy+rows*9+14; }
+    data.forEach((p,i)=>{
+      const ry2=py+i*9+1;
+      const mc=podiumColors[i]||[100,100,100];
+      setFill(mc); doc.roundedRect(sx+3,ry2-0.5,8,6,1,1,"F");
+      setFont(6,"bold"); setTxt(WHITE); doc.text(podiumLabels[i]||`${i+1}°`,sx+7,ry2+3.5,{align:"center"});
+      setFont(8.5,"normal"); setTxt(BLACK); doc.text(p.name, sx+13, ry2+3.5);
+      setFont(8.5,"bold"); setTxt(GREEN); doc.text(`${p[valKey]}`, sx+sw-4, ry2+3.5, {align:"right"});
+      if(i<data.length-1){ setStroke([238,238,238]); doc.setLineWidth(0.2); doc.line(sx+4,ry2+7,sx+sw-4,ry2+7); }
+    });
+    return sy + rows*9 + 14;
+  };
+
+  // ── Goal timing chart ──────────────────────────────────
+  const rangeKeys = RANGES;
+  const maxRangeVal = Math.max(...rangeKeys.map(r=>Math.max(goalRanges[r].an, goalRanges[r].rival)),1);
+  const rcW = CW; const rcH = 38;
+  const rcLeft = ML; const rcPb = 16; const rcPt = 6;
+  const rcCH = rcH - rcPb - rcPt;
+  const grpW = rcW / rangeKeys.length;
+  const barW = grpW * 0.28;
+
+  let rhy = secHdr(ML,y,CW,"🕐","Distribución de Goles por Franja de 15 min");
+  setFill(WHITE); setStroke(BORDER); doc.rect(ML,y,CW,rcH+10,"FD");
+  const rcBaseY = rhy + rcCH;
+
+  // Legend
+  setFill([0,170,68]); doc.rect(ML+CW-30,rhy+1,4,3,"F");
+  setFont(6.5,"normal"); setTxt(BLACK); doc.text("Nacional",ML+CW-24,rhy+3.5);
+  setFill([170,0,0]); doc.rect(ML+CW-13,rhy+1,4,3,"F");
+  doc.text("Rival",ML+CW-7,rhy+3.5);
+
+  rangeKeys.forEach((r,i)=>{
+    const xCenter = rcLeft + (i+0.5)*grpW;
+    const anH  = maxRangeVal>0 ? (goalRanges[r].an/maxRangeVal)*rcCH    : 0;
+    const rvH  = maxRangeVal>0 ? (goalRanges[r].rival/maxRangeVal)*rcCH : 0;
+    // Background
+    setFill([240,248,240]); doc.rect(xCenter-barW-0.5,rcBaseY-rcCH,barW,rcCH,"F");
+    setFill([248,240,240]); doc.rect(xCenter+0.5,rcBaseY-rcCH,barW,rcCH,"F");
+    // AN bar (green, left)
+    if(anH>0){ setFill([0,170,68]); doc.rect(xCenter-barW-0.5,rcBaseY-anH,barW,anH,"F"); }
+    // Rival bar (red, right)
+    if(rvH>0){ setFill([170,0,0]); doc.rect(xCenter+0.5,rcBaseY-rvH,barW,rvH,"F"); }
+    // Values
+    if(goalRanges[r].an>0){ setFont(6,"bold"); setTxt([0,100,0]); doc.text(String(goalRanges[r].an),xCenter-barW/2-0.5,rcBaseY-anH-1.5,{align:"center"}); }
+    if(goalRanges[r].rival>0){ setFont(6,"bold"); setTxt([150,0,0]); doc.text(String(goalRanges[r].rival),xCenter+barW/2+0.5,rcBaseY-rvH-1.5,{align:"center"}); }
+    // Range label
+    setFont(6,"normal"); setTxt(GRAY); doc.text(r,xCenter,rcBaseY+4,{align:"center"});
+  });
+  setStroke([200,200,200]); doc.setLineWidth(0.5);
+  doc.line(rcLeft+2,rcBaseY,rcLeft+CW-2,rcBaseY);
+  y += rcH + 14;
+
+  const maxPH = Math.max(allGoals.length, allAssists.length)*9+14;
+  drawPodium(ML,    y, HALF, "⚽","Goleadores",    allGoals,   "goals");
+  drawPodium(ML+HALF+4, y, HALF, "🎯","Asistencias",allAssists,"assists");
+  y += maxPH + 2;
+
+  const maxCH = Math.max(allYellows.length, allReds.length)*9+14;
+  drawPodium(ML,        y, HALF, "🟨","Amarillas",  allYellows,"yellows");
+  drawPodium(ML+HALF+4, y, HALF, "🟥","Rojas",      allReds,   "reds");
+  y += maxCH + 2;
+
+  // ── TABLA COMPLETA JUGADORES ────────────────────────────
+  const allSorted=[...players].filter(p=>p.appearances>0).sort((a,b)=>b.mins-a.mins);
+  let ty = secHdr(ML,y,CW,"👤","Estadísticas Individuales");
+  setFill(WHITE); setStroke(BORDER); doc.rect(ML,y,CW,allSorted.length*8+16,"FD");
+  // Table header
+  setFont(7.5,"bold"); setTxt(GRAY);
+  const cols=[
+    {label:"Jugador", x:ML+5},  {label:"PJ",x:ML+72}, {label:"Min",x:ML+84},
+    {label:"G",x:ML+96},  {label:"A",x:ML+106}, {label:"🟨",x:ML+116}, {label:"🟥",x:ML+126},
+  ];
+  cols.forEach(c=>doc.text(c.label,c.x,ty+2));
+  setStroke(GLIGHT); doc.setLineWidth(0.5); doc.line(ML+3,ty+4,ML+CW-3,ty+4);
+  ty += 6;
+  allSorted.forEach((p,i)=>{
+    const rowY=ty+i*8;
+    if(i%2===0){ setFill([248,255,248]); doc.rect(ML+1,rowY-1.5,CW-2,7,"F"); }
+    if(p.number){ setFill(GREEN); doc.roundedRect(ML+3,rowY-1,6,5.5,1,1,"F"); setFont(6.5,"bold"); setTxt(WHITE); doc.text(p.number,ML+6,rowY+2.8,{align:"center"}); }
+    setFont(8.5,"normal"); setTxt(BLACK); doc.text(p.name,ML+11,rowY+2.8);
+    setFont(8.5,"normal"); setTxt(GRAY);
+    doc.text(String(p.appearances), ML+72, rowY+2.8);
+    doc.text(String(p.mins)+"'",    ML+84, rowY+2.8);
+    setFont(8.5,"bold");
+    if(p.goals>0){   setTxt(GREEN);  doc.text(String(p.goals),   ML+96, rowY+2.8); } else { setTxt(GRAY); doc.text("—",ML+96,rowY+2.8); }
+    if(p.assists>0){ setTxt(BLUE);   doc.text(String(p.assists), ML+106,rowY+2.8); } else { setTxt(GRAY); doc.text("—",ML+106,rowY+2.8); }
+    if(p.yellows>0){ setTxt([150,100,0]); doc.text(String(p.yellows),ML+116,rowY+2.8); } else { setTxt(GRAY); doc.text("—",ML+116,rowY+2.8); }
+    if(p.reds>0){    setTxt(RED);    doc.text(String(p.reds),    ML+126,rowY+2.8); } else { setTxt(GRAY); doc.text("—",ML+126,rowY+2.8); }
+    if(i<allSorted.length-1){ setStroke([238,238,238]); doc.setLineWidth(0.2); doc.line(ML+3,rowY+5.5,ML+CW-3,rowY+5.5); }
+  });
+  y += allSorted.length*8+20;
+
+  // ── FOOTER ──────────────────────────────────────────────
+  setStroke(BORDER); doc.setLineWidth(0.4); doc.line(ML,y,ML+CW,y);
+  setFont(8,"normal"); setTxt(GRAY);
+  doc.text("PF Simón Duque Villegas · Atlético Nacional", PW/2, y+5, {align:"center"});
+
+  // Multi-page support
+  doc.save("Informe_Acumulado_AN.pdf");
+}
+
+// ── Accumulated Report Screen ───────────────────────────
+function AccumReportScreen({ history, onBack }) {
+  const [generating, setGenerating] = useState(false);
+  const { players, matches, goalRanges } = buildAccumStats(history);
+
+  const W=matches.filter(m=>m.result==="W").length;
+  const D=matches.filter(m=>m.result==="D").length;
+  const L=matches.filter(m=>m.result==="L").length;
+  const goalsF=matches.reduce((a,m)=>a+m.scoreAN,0);
+  const goalsA=matches.reduce((a,m)=>a+m.scoreRv,0);
+
+  const sorted_mins   = [...players].filter(p=>p.mins>0)   .sort((a,b)=>b.mins-a.mins);
+  const allGoals   = [...players].filter(p=>p.goals>0)  .sort((a,b)=>b.goals-a.goals);
+  const allAssists = [...players].filter(p=>p.assists>0).sort((a,b)=>b.assists-a.assists);
+  const allYellows = [...players].filter(p=>p.yellows>0).sort((a,b)=>b.yellows-a.yellows);
+  const allReds    = [...players].filter(p=>p.reds>0)   .sort((a,b)=>b.reds-a.reds);
+  const allSorted     = [...players].filter(p=>p.appearances>0).sort((a,b)=>b.mins-a.mins);
+  const maxMins       = Math.max(...sorted_mins.map(p=>p.mins),1);
+
+  const handlePDF = async () => {
+    setGenerating(true);
+    try { await generateAccumPDF(history); }
+    catch(e) { console.error(e); alert("Error generando PDF."); }
+    setGenerating(false);
+  };
+
+  const podiumColors = ["#B8860B","#787878","#8C5028","#667","#778","#889","#99a","#aab","#bbc","#ccd"];
+  const podiumEmojis = ["🥇","🥈","🥉","4°","5°","6°","7°","8°","9°","10°"];
+
+  const card = {background:"white",borderRadius:12,padding:16,marginBottom:12,boxShadow:"0 2px 8px rgba(0,0,0,0.07)"};
+  const st   = {color:G.greenDark,fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:15,marginBottom:10,borderBottom:"2px solid #e8f5e9",paddingBottom:7};
+
+  const StatPill = ({label,val,color="#004400"}) => (
+    <div style={{textAlign:"center",background:"rgba(0,68,0,0.08)",borderRadius:10,padding:"8px 16px"}}>
+      <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:22,color}}>{val}</div>
+      <div style={{fontSize:11,color:"#666",marginTop:2}}>{label}</div>
+    </div>
+  );
+
+  const PodiumList = ({data,valKey,color}) => (
+    <div>
+      {data.length===0 && <p style={{color:"#bbb",fontSize:13,margin:0}}>—</p>}
+      {data.map((p,i)=>(
+        <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 0",borderBottom:"1px solid #f0f0f0"}}>
+          <div style={{width:26,height:26,borderRadius:"50%",background:podiumColors[i],
+            display:"flex",alignItems:"center",justifyContent:"center",
+            flexShrink:0,fontSize:11,fontWeight:"bold",color:"white"}}>
+            {podiumEmojis[i]}
+          </div>
+          <span style={{fontFamily:"Georgia,serif",fontSize:14,flex:1}}>{p.name}</span>
+          <span style={{fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:16,color}}>{p[valKey]}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh",background:"#eef2ee",paddingBottom:60}}>
+      {/* Actions bar */}
+      <div style={{position:"sticky",top:0,background:"#002200",padding:"11px 18px",zIndex:10,
+        display:"flex",gap:9,justifyContent:"center",flexWrap:"wrap"}}>
+        <button onClick={handlePDF} disabled={generating}
+          style={{padding:"11px 22px",background:generating?"#888":G.greenBright,color:"#001a00",
+            border:"none",borderRadius:20,cursor:generating?"wait":"pointer",
+            fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:14}}>
+          {generating?"⏳ Generando...":"📄 Descargar PDF Acumulado"}
+        </button>
+        <button onClick={onBack}
+          style={{padding:"11px 16px",background:"rgba(255,255,255,0.15)",color:"white",
+            border:"none",borderRadius:20,cursor:"pointer",fontFamily:"Georgia,serif",fontSize:13}}>
+          ← Volver
+        </button>
+      </div>
+
+      <div style={{maxWidth:820,margin:"0 auto",padding:"20px 16px"}}>
+        {/* Cover */}
+        <div style={{background:"linear-gradient(135deg,#001e00,#005000)",borderRadius:16,
+          padding:"24px 22px",marginBottom:14,color:"white",textAlign:"center",
+          boxShadow:"0 8px 28px rgba(0,80,0,0.35)"}}>
+          <img src={AN_SHIELD} style={{width:52,height:60,objectFit:"contain",marginBottom:10}} alt="AN"
+            onError={e=>e.target.style.display="none"}/>
+          <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:22,letterSpacing:2,marginBottom:4}}>
+            ATLÉTICO NACIONAL
+          </div>
+          <div style={{fontSize:13,opacity:0.7,marginBottom:16}}>Informe Acumulado de Temporada</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(5,1fr)",gap:8,maxWidth:500,margin:"0 auto"}}>
+            <StatPill label="Partidos" val={matches.length} color="#00CC44"/>
+            <StatPill label="Victorias" val={W} color="#00CC44"/>
+            <StatPill label="Empates" val={D} color="#FFB300"/>
+            <StatPill label="Derrotas" val={L} color="#CC4444"/>
+            <StatPill label="Goles" val={`${goalsF}:${goalsA}`} color="#00CC44"/>
+          </div>
+        </div>
+
+        {/* Resultados */}
+        <div style={card}>
+          <div style={st}>📋 Resultados ({matches.length} partidos)</div>
+          {matches.length===0 && <p style={{color:"#bbb",fontSize:13}}>Sin partidos</p>}
+          {matches.map((m,i)=>{
+            const resColor = m.result==="W"?"#004400": m.result==="L"?"#880000":"#885500";
+            const resLabel = m.result==="W"?"Victoria": m.result==="L"?"Derrota":"Empate";
+            return (
+              <div key={i} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",
+                borderBottom:"1px solid #f0f0f0",background:i%2===0?"#f8fff8":"white",
+                paddingLeft:6,paddingRight:6}}>
+                <span style={{fontFamily:"Georgia,serif",fontSize:13,flex:1,fontWeight:"bold"}}>{m.rival}</span>
+                <span style={{fontSize:11,color:"#888",minWidth:80}}>{m.tournament}</span>
+                <span style={{fontSize:11,color:"#888",minWidth:70}}>{m.date}</span>
+                <span style={{fontFamily:"'Courier New',monospace",fontWeight:"bold",fontSize:14,minWidth:30}}>
+                  {m.scoreAN}–{m.scoreRv}
+                </span>
+                <span style={{background:resColor,color:"white",borderRadius:12,
+                  padding:"2px 9px",fontSize:11,fontWeight:"bold",minWidth:60,textAlign:"center"}}>
+                  {resLabel}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Minutos jugados — bar chart */}
+        {sorted_mins.length>0&&(
+          <div style={card}>
+            <div style={st}>⏱ Minutos Jugados Acumulados</div>
+            <div style={{display:"flex",gap:2,alignItems:"flex-end",height:120,
+              padding:"0 4px 0 30px",position:"relative"}}>
+              {[100,200,300,500].map(v=>v<=maxMins&&(
+                <div key={v} style={{position:"absolute",left:0,bottom:20+((v/maxMins)*90),
+                  color:"#aaa",fontSize:9,fontFamily:"'Courier New',monospace"}}>{v}</div>
+              ))}
+              {sorted_mins.map((p,i)=>{
+                const barH=Math.max(4,(p.mins/maxMins)*90);
+                return (
+                  <div key={i} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",gap:1}}>
+                    <span style={{fontSize:8,fontFamily:"'Courier New',monospace",fontWeight:"bold",
+                      color:G.greenDark,marginBottom:1}}>{p.mins}&apos;</span>
+                    <div style={{width:"65%",background:"#e8f5e9",borderRadius:"3px 3px 0 0",
+                      height:90,display:"flex",alignItems:"flex-end"}}>
+                      <div style={{width:"100%",height:barH,background:"#00AA44",borderRadius:"3px 3px 0 0"}}/>
+                    </div>
+                    {p.number&&(
+                      <div style={{background:G.greenDark,color:"white",borderRadius:3,
+                        padding:"1px 4px",fontSize:8,fontWeight:"bold",marginTop:2}}>{p.number}</div>
+                    )}
+                    <div style={{fontSize:7.5,fontWeight:"bold",color:"#1a1a1a",
+                      textAlign:"center",maxWidth:30,lineHeight:1.1,marginTop:1}}>
+                      {p.name.split(" ").length>1
+                        ? `${p.name.split(" ")[0][0]}. ${p.name.split(" ").slice(-1)[0]}`
+                        : p.name}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Goles por franja — bar chart grouped */}
+        <div style={card}>
+          <div style={st}>🕐 Goles por Franja de 15 min</div>
+          <div style={{display:"flex",alignItems:"flex-end",gap:0,height:100,paddingBottom:20,position:"relative"}}>
+            {RANGES.map((r,i)=>{
+              const an=goalRanges[r].an, rv=goalRanges[r].rival;
+              const maxV=Math.max(...RANGES.map(rx=>Math.max(goalRanges[rx].an,goalRanges[rx].rival)),1);
+              const anH=Math.max(0,(an/maxV)*70), rvH=Math.max(0,(rv/maxV)*70);
+              return (
+                <div key={r} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center"}}>
+                  <div style={{display:"flex",alignItems:"flex-end",gap:2,height:80}}>
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:12}}>
+                      {an>0&&<span style={{fontSize:8,fontWeight:"bold",color:"#004400",marginBottom:1}}>{an}</span>}
+                      <div style={{width:12,height:anH,background:"#00AA44",borderRadius:"2px 2px 0 0",minHeight:an>0?2:0}}/>
+                    </div>
+                    <div style={{display:"flex",flexDirection:"column",alignItems:"center",width:12}}>
+                      {rv>0&&<span style={{fontSize:8,fontWeight:"bold",color:"#880000",marginBottom:1}}>{rv}</span>}
+                      <div style={{width:12,height:rvH,background:"#CC2200",borderRadius:"2px 2px 0 0",minHeight:rv>0?2:0}}/>
+                    </div>
+                  </div>
+                  <div style={{width:"100%",borderTop:"1px solid #ccc"}}/>
+                  <div style={{fontSize:9,color:"#666",marginTop:3,textAlign:"center",fontWeight:"bold"}}>{r}</div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{display:"flex",gap:14,justifyContent:"flex-end",marginTop:4}}>
+            <span style={{fontSize:11,color:"#555"}}><span style={{color:"#00AA44",fontWeight:"bold"}}>■</span> Nacional</span>
+            <span style={{fontSize:11,color:"#555"}}><span style={{color:"#CC2200",fontWeight:"bold"}}>■</span> Rival</span>
+          </div>
+        </div>
+
+        {/* Podios */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:12}}>
+          <div style={card}>
+            <div style={st}>⚽ Goleadores</div>
+            <PodiumList data={allGoals} valKey="goals" color={G.greenDark}/>
+          </div>
+          <div style={card}>
+            <div style={st}>🎯 Asistencias</div>
+            <PodiumList data={allAssists} valKey="assists" color="#004488"/>
+          </div>
+          <div style={card}>
+            <div style={st}>🟨 Amarillas</div>
+            <PodiumList data={allYellows} valKey="yellows" color="#885500"/>
+          </div>
+          <div style={card}>
+            <div style={st}>🟥 Rojas</div>
+            <PodiumList data={allReds} valKey="reds" color="#880000"/>
+          </div>
+        </div>
+
+        {/* Tabla individual */}
+        <div style={card}>
+          <div style={st}>👤 Estadísticas Individuales</div>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse",fontFamily:"Georgia,serif",fontSize:13}}>
+              <thead>
+                <tr style={{background:"#f0fff0"}}>
+                  {["#","Jugador","PJ","Min","Goles","Asist.","🟨","🟥"].map(h=>(
+                    <th key={h} style={{padding:"6px 8px",textAlign:"left",color:G.greenDark,
+                      fontSize:11,fontWeight:"bold",borderBottom:"2px solid #e8f5e9"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {allSorted.map((p,i)=>(
+                  <tr key={i} style={{background:i%2===0?"#f8fff8":"white"}}>
+                    <td style={{padding:"5px 8px"}}>
+                      {p.number&&<span style={{background:G.greenDark,color:"white",borderRadius:4,
+                        padding:"1px 5px",fontWeight:"bold",fontSize:11}}>{p.number}</span>}
+                    </td>
+                    <td style={{padding:"5px 8px",fontWeight:"bold"}}>{p.name}</td>
+                    <td style={{padding:"5px 8px"}}>
+                      <span style={{background:"#e8f5e9",color:G.greenDark,borderRadius:6,
+                        padding:"2px 7px",fontWeight:"bold",fontSize:12}}>{p.appearances}</span>
+                    </td>
+                    <td style={{padding:"5px 8px",fontFamily:"'Courier New',monospace",fontWeight:"bold",color:G.greenDark}}>{p.mins}&apos;</td>
+                    <td style={{padding:"5px 8px",fontWeight:"bold",color:p.goals>0?G.greenDark:"#ccc",fontSize:14}}>{p.goals||"—"}</td>
+                    <td style={{padding:"5px 8px",fontWeight:"bold",color:p.assists>0?"#004488":"#ccc",fontSize:14}}>{p.assists||"—"}</td>
+                    <td style={{padding:"5px 8px",fontWeight:"bold",color:p.yellows>0?"#885500":"#ccc"}}>{p.yellows||"—"}</td>
+                    <td style={{padding:"5px 8px",fontWeight:"bold",color:p.reds>0?"#880000":"#ccc"}}>{p.reds||"—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style={{textAlign:"center",padding:"16px 0",color:"#aaa",fontFamily:"Georgia,serif",fontSize:12}}>
+          PF Simón Duque Villegas · Atlético Nacional
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Persistence ─────────────────────────────────────────
+
 // ── Main App ─────────────────────────────────────────────
 export default function App() {
   const [screen, setScreen]     = useState("setup");
@@ -1101,15 +1654,24 @@ export default function App() {
       events={histDetail.events} t1Real={histDetail.t1Real||45} t2Real={histDetail.t2Real||45}
       onBack={()=>setHistDetail(null)} onNewMatch={()=>setHistDetail(null)}/>
   );
-  if (screen==="live") return <LiveScreen matchData={matchData} onEnd={handleEnd}/>;
+  if (screen==="live")   return <LiveScreen matchData={matchData} onEnd={handleEnd}/>;
   if (screen==="report") return (
     <ReportScreen matchData={matchData} score={score} events={events} t1Real={t1Real} t2Real={t2Real}
       onBack={()=>setScreen("live")} onNewMatch={()=>{ setMatchData(null); setScreen("setup"); }}/>
   );
+  if (screen==="accum")  return <AccumReportScreen history={history} onBack={()=>setScreen("setup")}/>;
 
   return (
     <>
       <SetupScreen onStart={handleStart}/>
+      {/* Informe acumulado */}
+      <button onClick={()=>setScreen("accum")}
+        style={{position:"fixed",bottom:22,left:22,padding:"11px 18px",
+          background:"linear-gradient(135deg,#004400,#008800)",color:"white",border:"none",borderRadius:22,
+          cursor:"pointer",fontFamily:"Georgia,serif",fontSize:13,fontWeight:"bold",
+          boxShadow:"0 4px 12px rgba(0,0,0,0.4)"}}>
+        📊 Informe Acumulado
+      </button>
       <button onClick={()=>setShowH(true)}
         style={{position:"fixed",bottom:22,right:22,padding:"11px 18px",
           background:"rgba(0,70,0,0.92)",color:"white",border:"none",borderRadius:22,
