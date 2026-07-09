@@ -10,18 +10,72 @@ const G = {
 const POSITIONS = ["POR","DEF","LAT","MED","EXT","DEL"];
 const T1_CLOCK = 45;
 
-// ── Timer ──────────────────────────────────────────────
+// ── Timer (Web Worker + Wake Lock) ─────────────────────
 function useTimer() {
   const [running, setRunning] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [half, setHalf] = useState(1);
-  const ref = useRef(null);
-  const start = useCallback(() => {
-    if (!running) { setRunning(true); ref.current = setInterval(() => setSeconds(s => s+1), 1000); }
+  const workerRef = useRef(null);
+  const wakeLockRef = useRef(null);
+
+  // Init worker once
+  useEffect(() => {
+    workerRef.current = new Worker("/timer-worker.js");
+    workerRef.current.onmessage = (e) => {
+      if (e.data.type === "TICK") setSeconds(e.data.seconds);
+    };
+    return () => {
+      workerRef.current?.terminate();
+      wakeLockRef.current?.release();
+    };
+  }, []);
+
+  // Wake Lock — keeps screen on while timer runs
+  const requestWakeLock = async () => {
+    try {
+      if ("wakeLock" in navigator) {
+        wakeLockRef.current = await navigator.wakeLock.request("screen");
+      }
+    } catch (e) { console.log("Wake Lock not available:", e); }
+  };
+
+  const releaseWakeLock = () => {
+    wakeLockRef.current?.release();
+    wakeLockRef.current = null;
+  };
+
+  // Re-acquire wake lock if page becomes visible again
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && running) requestWakeLock();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
   }, [running]);
-  const pause = useCallback(() => { setRunning(false); clearInterval(ref.current); }, []);
-  const secondHalf = useCallback(() => { setRunning(false); clearInterval(ref.current); setSeconds(0); setHalf(2); }, []);
-  useEffect(() => () => clearInterval(ref.current), []);
+
+  const start = useCallback(() => {
+    if (!running) {
+      setRunning(true);
+      workerRef.current?.postMessage({ type: "START" });
+      requestWakeLock();
+    }
+  }, [running]);
+
+  const pause = useCallback(() => {
+    setRunning(false);
+    workerRef.current?.postMessage({ type: "PAUSE" });
+    releaseWakeLock();
+  }, []);
+
+  const secondHalf = useCallback(() => {
+    setRunning(false);
+    workerRef.current?.postMessage({ type: "PAUSE" });
+    workerRef.current?.postMessage({ type: "RESET" });
+    setSeconds(0);
+    setHalf(2);
+    releaseWakeLock();
+  }, []);
+
   const mins = Math.floor(seconds/60);
   const display = `${String(mins).padStart(2,"0")}:${String(seconds%60).padStart(2,"0")}`;
   const matchMin = Math.max(1, mins+1) + (half===2 ? 45 : 0);
