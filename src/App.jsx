@@ -1143,6 +1143,196 @@ function ReportScreen({ matchData, score, events, t1Real, t2Real, onBack, onNewM
   );
 }
 
+
+// ── Edit Match Screen ───────────────────────────────────
+function EditMatchScreen({ match, onSave, onClose }) {
+  const [score, setScore] = useState([...match.score]);
+  const [events, setEvents] = useState([...match.events]);
+  const [modal, setModal] = useState(null);
+  const [pending, setPending] = useState({});
+
+  const allP = match.matchData.players || [];
+
+  const removeEvent = (id) => setEvents(prev => prev.filter(e => e.id !== id));
+
+  const addEv = (type, data) => {
+    setEvents(prev => [...prev, {id: Date.now(), type, ...data}].sort((a,b)=>a.minute-b.minute));
+  };
+
+  // Add goal
+  const onGP = p => { setPending({player:p}); setModal(p.isOpponent?"gm":"gz"); };
+  const onGZ = (id,label) => { setPending(v=>({...v,zone:id,zoneLabel:label})); setModal("ga"); };
+  const onGA = a => { setPending(v=>({...v,assist:a})); setModal("gm"); };
+  const onGM = min => {
+    const opp = pending.player?.isOpponent;
+    if (!opp) setScore(s=>[s[0]+1,s[1]]); else setScore(s=>[s[0],s[1]+1]);
+    addEv("goal",{player:pending.player,zone:pending.zone,zoneLabel:pending.zoneLabel,
+      assist:pending.assist,minute:min,isOpponent:opp});
+    setPending({}); setModal(null);
+  };
+
+  // Add yellow
+  const onYP = p => { setPending({player:p}); setModal("ym"); };
+  const onYM = min => { addEv("yellow",{player:pending.player,minute:min}); setPending({}); setModal(null); };
+
+  // Add red
+  const onRP = p => { setPending({player:p}); setModal("rm"); };
+  const onRM = min => { addEv("red",{player:pending.player,minute:min}); setPending({}); setModal(null); };
+
+  // Add sub
+  const onSO = p => { setPending({out:p}); setModal("si"); };
+  const onSI = p => { addEv("sub",{out:pending.out,in:p,minute:pending.minute||0}); setPending({}); setModal(null); };
+
+  const icon = t => ({goal:"⚽",yellow:"🟨",red:"🟥",injury:"🚑",sub:"🔄"}[t]||"•");
+
+  const evLabel = (ev) => {
+    if (ev.type==="goal") return ev.isOpponent ? `Gol rival` : `${ev.player?.name||""}${ev.zoneLabel?" ("+ev.zoneLabel+")":""}`;
+    if (ev.type==="yellow") return `Amarilla: ${ev.player?.name||""}`;
+    if (ev.type==="red")    return `Roja: ${ev.player?.name||""}`;
+    if (ev.type==="injury") return `Lesión: ${ev.player?.name||""}`;
+    if (ev.type==="sub")    return `${ev.out?.name||""} → ${ev.in?.name||""}`;
+    return "";
+  };
+
+  const [addMin, setAddMin] = useState("1");
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:400,
+      display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"white",borderRadius:16,padding:0,width:"100%",maxWidth:600,
+        maxHeight:"92vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
+
+        {/* Header */}
+        <div style={{background:G.greenDark,borderRadius:"16px 16px 0 0",padding:"16px 20px",
+          display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{color:"white",fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:16}}>
+              ✏️ Editando: AN vs {match.matchData.rival}
+            </div>
+            <div style={{color:"rgba(255,255,255,0.6)",fontSize:12,marginTop:2}}>
+              {match.matchData.date} · {match.matchData.jornada}
+            </div>
+          </div>
+          <button onClick={onClose}
+            style={{background:"rgba(255,255,255,0.15)",border:"none",color:"white",
+              borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:14}}>
+            Cancelar
+          </button>
+        </div>
+
+        <div style={{padding:20}}>
+          {/* Score editor */}
+          <div style={{background:"#f0fff0",borderRadius:12,padding:16,marginBottom:16,
+            border:"1px solid #c8e6c9"}}>
+            <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",color:G.greenDark,
+              fontSize:14,marginBottom:10}}>⚽ Resultado</div>
+            <div style={{display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:11,color:"#666",marginBottom:4}}>Nacional</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <button onClick={()=>setScore(s=>[Math.max(0,s[0]-1),s[1]])}
+                    style={{width:32,height:32,background:"#880000",color:"white",border:"none",
+                      borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:"bold"}}>−</button>
+                  <span style={{fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:28,
+                    minWidth:32,textAlign:"center"}}>{score[0]}</span>
+                  <button onClick={()=>setScore(s=>[s[0]+1,s[1]])}
+                    style={{width:32,height:32,background:G.greenDark,color:"white",border:"none",
+                      borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:"bold"}}>+</button>
+                </div>
+              </div>
+              <span style={{fontFamily:"Georgia,serif",fontSize:24,color:"#888"}}>—</span>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:11,color:"#666",marginBottom:4}}>{match.matchData.rival}</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <button onClick={()=>setScore(s=>[s[0],Math.max(0,s[1]-1)])}
+                    style={{width:32,height:32,background:"#880000",color:"white",border:"none",
+                      borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:"bold"}}>−</button>
+                  <span style={{fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:28,
+                    minWidth:32,textAlign:"center"}}>{score[1]}</span>
+                  <button onClick={()=>setScore(s=>[s[0],s[1]+1])}
+                    style={{width:32,height:32,background:"#880000",color:"white",border:"none",
+                      borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:"bold"}}>+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Add event buttons */}
+          <div style={{background:"#f8f8f8",borderRadius:12,padding:14,marginBottom:16,
+            border:"1px solid #eee"}}>
+            <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",color:G.greenDark,
+              fontSize:14,marginBottom:10}}>➕ Agregar evento</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+              {[
+                {label:"Gol",emoji:"⚽",bg:"#004d00",action:()=>setModal("gp")},
+                {label:"Amarilla",emoji:"🟨",bg:"#885500",action:()=>setModal("yp")},
+                {label:"Roja",emoji:"🟥",bg:"#880000",action:()=>setModal("rp")},
+                {label:"Cambio",emoji:"🔄",bg:"#003366",action:()=>setModal("so")},
+              ].map((b,i)=>(
+                <button key={i} onClick={b.action}
+                  style={{padding:"10px 4px",background:b.bg,color:"white",border:"none",
+                    borderRadius:9,cursor:"pointer",fontFamily:"Georgia,serif",fontSize:12,
+                    fontWeight:"bold",display:"flex",flexDirection:"column",
+                    alignItems:"center",gap:3}}>
+                  <span style={{fontSize:20}}>{b.emoji}</span>
+                  <span>{b.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Events list */}
+          <div style={{marginBottom:16}}>
+            <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",color:G.greenDark,
+              fontSize:14,marginBottom:8}}>📋 Eventos ({events.length}) — tocá 🗑 para eliminar</div>
+            {events.length===0 && <p style={{color:"#bbb",fontSize:13}}>Sin eventos</p>}
+            {events.map(ev=>(
+              <div key={ev.id} style={{display:"flex",alignItems:"center",gap:8,
+                padding:"8px 10px",marginBottom:6,background:"#f9f9f9",
+                borderRadius:8,border:"1px solid #eee"}}>
+                <span style={{fontSize:16}}>{icon(ev.type)}</span>
+                <span style={{fontFamily:"'Courier New',monospace",fontWeight:"bold",
+                  fontSize:12,color:G.greenDark,minWidth:32}}>{ev.minute}&apos;</span>
+                <span style={{fontFamily:"Georgia,serif",fontSize:13,flex:1}}>{evLabel(ev)}</span>
+                <button onClick={()=>removeEvent(ev.id)}
+                  style={{background:"#ffeeee",border:"1px solid #ffcccc",color:"#cc0000",
+                    borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:13}}>
+                  🗑
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Save */}
+          <button onClick={()=>onSave({...match,score,events})}
+            style={{width:"100%",padding:14,background:"linear-gradient(135deg,#004400,#008800)",
+              color:"white",border:"none",borderRadius:10,cursor:"pointer",
+              fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:16}}>
+            ✓ Guardar cambios
+          </button>
+        </div>
+      </div>
+
+      {/* Modals */}
+      {modal==="gp" && <PlayerSelect players={allP} label="⚽ ¿Quién hizo el gol?" onSelect={onGP} onClose={()=>setModal(null)}
+        extra={<button onClick={()=>onGP({name:`Gol ${match.matchData.rival}`,isOpponent:true})}
+          style={{display:"block",width:"100%",padding:"11px 12px",marginBottom:7,background:"#880000",
+            color:"white",border:"none",borderRadius:9,cursor:"pointer",fontFamily:"Georgia,serif",fontSize:14}}>
+          ⚽ Gol del rival
+        </button>}/>}
+      {modal==="gz" && <ZonePicker onSelect={onGZ} onClose={()=>setModal(null)}/>}
+      {modal==="ga" && <AssistSelect players={allP.filter(p=>p.name!==pending.player?.name)} onSelect={onGA} onClose={()=>setModal(null)}/>}
+      {modal==="gm" && <MinuteInput autoMin={pending.minute||1} label="⚽ Minuto del gol" onConfirm={onGM} onClose={()=>setModal(null)}/>}
+      {modal==="yp" && <PlayerSelect players={allP} label="🟨 Amarilla a..." onSelect={onYP} onClose={()=>setModal(null)}/>}
+      {modal==="ym" && <MinuteInput autoMin={1} label="🟨 Minuto amarilla" onConfirm={onYM} onClose={()=>setModal(null)}/>}
+      {modal==="rp" && <PlayerSelect players={allP} label="🟥 Roja a..." onSelect={onRP} onClose={()=>setModal(null)}/>}
+      {modal==="rm" && <MinuteInput autoMin={1} label="🟥 Minuto roja" onConfirm={onRM} onClose={()=>setModal(null)}/>}
+      {modal==="so" && <PlayerSelect players={allP.filter(p=>p.type==="titular")} label="🔄 ¿Quién sale?" onSelect={onSO} onClose={()=>setModal(null)}/>}
+      {modal==="si" && <PlayerSelect players={allP.filter(p=>p.type==="suplente")} label="🔄 ¿Quién entra?" onSelect={onSI} onClose={()=>setModal(null)}/>}
+    </div>
+  );
+}
+
 // ── Persistence ─────────────────────────────────────────
 const SK = "an_match_v5";
 const loadH = () => { try { return JSON.parse(localStorage.getItem(SK)||"[]"); } catch { return []; } };
@@ -1699,6 +1889,196 @@ function AccumReportScreen({ history, onBack }) {
   );
 }
 
+
+// ── Edit Match Screen ───────────────────────────────────
+function EditMatchScreen({ match, onSave, onClose }) {
+  const [score, setScore] = useState([...match.score]);
+  const [events, setEvents] = useState([...match.events]);
+  const [modal, setModal] = useState(null);
+  const [pending, setPending] = useState({});
+
+  const allP = match.matchData.players || [];
+
+  const removeEvent = (id) => setEvents(prev => prev.filter(e => e.id !== id));
+
+  const addEv = (type, data) => {
+    setEvents(prev => [...prev, {id: Date.now(), type, ...data}].sort((a,b)=>a.minute-b.minute));
+  };
+
+  // Add goal
+  const onGP = p => { setPending({player:p}); setModal(p.isOpponent?"gm":"gz"); };
+  const onGZ = (id,label) => { setPending(v=>({...v,zone:id,zoneLabel:label})); setModal("ga"); };
+  const onGA = a => { setPending(v=>({...v,assist:a})); setModal("gm"); };
+  const onGM = min => {
+    const opp = pending.player?.isOpponent;
+    if (!opp) setScore(s=>[s[0]+1,s[1]]); else setScore(s=>[s[0],s[1]+1]);
+    addEv("goal",{player:pending.player,zone:pending.zone,zoneLabel:pending.zoneLabel,
+      assist:pending.assist,minute:min,isOpponent:opp});
+    setPending({}); setModal(null);
+  };
+
+  // Add yellow
+  const onYP = p => { setPending({player:p}); setModal("ym"); };
+  const onYM = min => { addEv("yellow",{player:pending.player,minute:min}); setPending({}); setModal(null); };
+
+  // Add red
+  const onRP = p => { setPending({player:p}); setModal("rm"); };
+  const onRM = min => { addEv("red",{player:pending.player,minute:min}); setPending({}); setModal(null); };
+
+  // Add sub
+  const onSO = p => { setPending({out:p}); setModal("si"); };
+  const onSI = p => { addEv("sub",{out:pending.out,in:p,minute:pending.minute||0}); setPending({}); setModal(null); };
+
+  const icon = t => ({goal:"⚽",yellow:"🟨",red:"🟥",injury:"🚑",sub:"🔄"}[t]||"•");
+
+  const evLabel = (ev) => {
+    if (ev.type==="goal") return ev.isOpponent ? `Gol rival` : `${ev.player?.name||""}${ev.zoneLabel?" ("+ev.zoneLabel+")":""}`;
+    if (ev.type==="yellow") return `Amarilla: ${ev.player?.name||""}`;
+    if (ev.type==="red")    return `Roja: ${ev.player?.name||""}`;
+    if (ev.type==="injury") return `Lesión: ${ev.player?.name||""}`;
+    if (ev.type==="sub")    return `${ev.out?.name||""} → ${ev.in?.name||""}`;
+    return "";
+  };
+
+  const [addMin, setAddMin] = useState("1");
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.85)",zIndex:400,
+      display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"white",borderRadius:16,padding:0,width:"100%",maxWidth:600,
+        maxHeight:"92vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.5)"}}>
+
+        {/* Header */}
+        <div style={{background:G.greenDark,borderRadius:"16px 16px 0 0",padding:"16px 20px",
+          display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <div style={{color:"white",fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:16}}>
+              ✏️ Editando: AN vs {match.matchData.rival}
+            </div>
+            <div style={{color:"rgba(255,255,255,0.6)",fontSize:12,marginTop:2}}>
+              {match.matchData.date} · {match.matchData.jornada}
+            </div>
+          </div>
+          <button onClick={onClose}
+            style={{background:"rgba(255,255,255,0.15)",border:"none",color:"white",
+              borderRadius:8,padding:"6px 12px",cursor:"pointer",fontSize:14}}>
+            Cancelar
+          </button>
+        </div>
+
+        <div style={{padding:20}}>
+          {/* Score editor */}
+          <div style={{background:"#f0fff0",borderRadius:12,padding:16,marginBottom:16,
+            border:"1px solid #c8e6c9"}}>
+            <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",color:G.greenDark,
+              fontSize:14,marginBottom:10}}>⚽ Resultado</div>
+            <div style={{display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:11,color:"#666",marginBottom:4}}>Nacional</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <button onClick={()=>setScore(s=>[Math.max(0,s[0]-1),s[1]])}
+                    style={{width:32,height:32,background:"#880000",color:"white",border:"none",
+                      borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:"bold"}}>−</button>
+                  <span style={{fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:28,
+                    minWidth:32,textAlign:"center"}}>{score[0]}</span>
+                  <button onClick={()=>setScore(s=>[s[0]+1,s[1]])}
+                    style={{width:32,height:32,background:G.greenDark,color:"white",border:"none",
+                      borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:"bold"}}>+</button>
+                </div>
+              </div>
+              <span style={{fontFamily:"Georgia,serif",fontSize:24,color:"#888"}}>—</span>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:11,color:"#666",marginBottom:4}}>{match.matchData.rival}</div>
+                <div style={{display:"flex",alignItems:"center",gap:8}}>
+                  <button onClick={()=>setScore(s=>[s[0],Math.max(0,s[1]-1)])}
+                    style={{width:32,height:32,background:"#880000",color:"white",border:"none",
+                      borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:"bold"}}>−</button>
+                  <span style={{fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:28,
+                    minWidth:32,textAlign:"center"}}>{score[1]}</span>
+                  <button onClick={()=>setScore(s=>[s[0],s[1]+1])}
+                    style={{width:32,height:32,background:"#880000",color:"white",border:"none",
+                      borderRadius:8,cursor:"pointer",fontSize:18,fontWeight:"bold"}}>+</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Add event buttons */}
+          <div style={{background:"#f8f8f8",borderRadius:12,padding:14,marginBottom:16,
+            border:"1px solid #eee"}}>
+            <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",color:G.greenDark,
+              fontSize:14,marginBottom:10}}>➕ Agregar evento</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
+              {[
+                {label:"Gol",emoji:"⚽",bg:"#004d00",action:()=>setModal("gp")},
+                {label:"Amarilla",emoji:"🟨",bg:"#885500",action:()=>setModal("yp")},
+                {label:"Roja",emoji:"🟥",bg:"#880000",action:()=>setModal("rp")},
+                {label:"Cambio",emoji:"🔄",bg:"#003366",action:()=>setModal("so")},
+              ].map((b,i)=>(
+                <button key={i} onClick={b.action}
+                  style={{padding:"10px 4px",background:b.bg,color:"white",border:"none",
+                    borderRadius:9,cursor:"pointer",fontFamily:"Georgia,serif",fontSize:12,
+                    fontWeight:"bold",display:"flex",flexDirection:"column",
+                    alignItems:"center",gap:3}}>
+                  <span style={{fontSize:20}}>{b.emoji}</span>
+                  <span>{b.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Events list */}
+          <div style={{marginBottom:16}}>
+            <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",color:G.greenDark,
+              fontSize:14,marginBottom:8}}>📋 Eventos ({events.length}) — tocá 🗑 para eliminar</div>
+            {events.length===0 && <p style={{color:"#bbb",fontSize:13}}>Sin eventos</p>}
+            {events.map(ev=>(
+              <div key={ev.id} style={{display:"flex",alignItems:"center",gap:8,
+                padding:"8px 10px",marginBottom:6,background:"#f9f9f9",
+                borderRadius:8,border:"1px solid #eee"}}>
+                <span style={{fontSize:16}}>{icon(ev.type)}</span>
+                <span style={{fontFamily:"'Courier New',monospace",fontWeight:"bold",
+                  fontSize:12,color:G.greenDark,minWidth:32}}>{ev.minute}&apos;</span>
+                <span style={{fontFamily:"Georgia,serif",fontSize:13,flex:1}}>{evLabel(ev)}</span>
+                <button onClick={()=>removeEvent(ev.id)}
+                  style={{background:"#ffeeee",border:"1px solid #ffcccc",color:"#cc0000",
+                    borderRadius:6,padding:"4px 8px",cursor:"pointer",fontSize:13}}>
+                  🗑
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Save */}
+          <button onClick={()=>onSave({...match,score,events})}
+            style={{width:"100%",padding:14,background:"linear-gradient(135deg,#004400,#008800)",
+              color:"white",border:"none",borderRadius:10,cursor:"pointer",
+              fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:16}}>
+            ✓ Guardar cambios
+          </button>
+        </div>
+      </div>
+
+      {/* Modals */}
+      {modal==="gp" && <PlayerSelect players={allP} label="⚽ ¿Quién hizo el gol?" onSelect={onGP} onClose={()=>setModal(null)}
+        extra={<button onClick={()=>onGP({name:`Gol ${match.matchData.rival}`,isOpponent:true})}
+          style={{display:"block",width:"100%",padding:"11px 12px",marginBottom:7,background:"#880000",
+            color:"white",border:"none",borderRadius:9,cursor:"pointer",fontFamily:"Georgia,serif",fontSize:14}}>
+          ⚽ Gol del rival
+        </button>}/>}
+      {modal==="gz" && <ZonePicker onSelect={onGZ} onClose={()=>setModal(null)}/>}
+      {modal==="ga" && <AssistSelect players={allP.filter(p=>p.name!==pending.player?.name)} onSelect={onGA} onClose={()=>setModal(null)}/>}
+      {modal==="gm" && <MinuteInput autoMin={pending.minute||1} label="⚽ Minuto del gol" onConfirm={onGM} onClose={()=>setModal(null)}/>}
+      {modal==="yp" && <PlayerSelect players={allP} label="🟨 Amarilla a..." onSelect={onYP} onClose={()=>setModal(null)}/>}
+      {modal==="ym" && <MinuteInput autoMin={1} label="🟨 Minuto amarilla" onConfirm={onYM} onClose={()=>setModal(null)}/>}
+      {modal==="rp" && <PlayerSelect players={allP} label="🟥 Roja a..." onSelect={onRP} onClose={()=>setModal(null)}/>}
+      {modal==="rm" && <MinuteInput autoMin={1} label="🟥 Minuto roja" onConfirm={onRM} onClose={()=>setModal(null)}/>}
+      {modal==="so" && <PlayerSelect players={allP.filter(p=>p.type==="titular")} label="🔄 ¿Quién sale?" onSelect={onSO} onClose={()=>setModal(null)}/>}
+      {modal==="si" && <PlayerSelect players={allP.filter(p=>p.type==="suplente")} label="🔄 ¿Quién entra?" onSelect={onSI} onClose={()=>setModal(null)}/>}
+    </div>
+  );
+}
+
 // ── Persistence ─────────────────────────────────────────
 
 // ── Main App ─────────────────────────────────────────────
@@ -1712,6 +2092,7 @@ export default function App() {
   const [history, setHistory]   = useState([]);
   const [showH, setShowH]       = useState(false);
   const [histDetail, setHistDetail] = useState(null);
+  const [editMatch, setEditMatch] = useState(null);
 
   // Load jsPDF script once
   useEffect(() => {
@@ -1763,22 +2144,46 @@ export default function App() {
       {showH&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.78)",zIndex:300,
           display:"flex",alignItems:"center",justifyContent:"center"}}>
-          <div style={{background:"white",borderRadius:16,padding:24,maxWidth:460,
+          <div style={{background:"white",borderRadius:16,padding:24,maxWidth:500,
             width:"90%",maxHeight:"80vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.4)"}}>
             <h3 style={{margin:"0 0 14px",color:G.greenDark,fontFamily:"Georgia,serif",fontSize:19}}>📚 Partidos Guardados</h3>
             {history.length===0
               ? <p style={{color:"#aaa",fontSize:13}}>Sin partidos guardados</p>
               : history.map(h=>(
-                <div key={h.id} onClick={()=>{setHistDetail(h);setShowH(false);}}
-                  style={{padding:"11px 13px",marginBottom:7,background:"#f5fff5",
-                    borderRadius:9,border:"1px solid #ddd",cursor:"pointer"}}
-                  onMouseEnter={e=>e.currentTarget.style.background="#e8ffe8"}
-                  onMouseLeave={e=>e.currentTarget.style.background="#f5fff5"}>
-                  <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:15,color:G.greenDark}}>
-                    AN {h.score[0]} – {h.score[1]} {h.matchData?.rival}
+                <div key={h.id} style={{marginBottom:8,background:"#f5fff5",
+                    borderRadius:9,border:"1px solid #ddd",overflow:"hidden"}}>
+                  {/* Match info row */}
+                  <div onClick={()=>{setHistDetail(h);setShowH(false);}}
+                    style={{padding:"11px 13px",cursor:"pointer"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="#e8ffe8"}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:15,color:G.greenDark}}>
+                      AN {h.score[0]} – {h.score[1]} {h.matchData?.rival}
+                    </div>
+                    <div style={{fontSize:12,color:"#888",marginTop:2}}>
+                      {h.matchData?.tournament} · {h.matchData?.date}
+                    </div>
                   </div>
-                  <div style={{fontSize:12,color:"#888",marginTop:2}}>
-                    {h.matchData?.tournament} · {h.matchData?.date}
+                  {/* Action buttons */}
+                  <div style={{display:"flex",borderTop:"1px solid #e8f5e9"}}>
+                    <button onClick={()=>{setEditMatch(h);setShowH(false);}}
+                      style={{flex:1,padding:"8px",background:"transparent",border:"none",
+                        borderRight:"1px solid #e8f5e9",cursor:"pointer",
+                        color:G.greenDark,fontFamily:"Georgia,serif",fontSize:13,fontWeight:"bold"}}>
+                      ✏️ Editar
+                    </button>
+                    <button onClick={()=>{
+                        if(window.confirm(`¿Eliminar partido AN vs ${h.matchData?.rival}? Esta acción no se puede deshacer.`)){
+                          const updated = history.filter(m=>m.id!==h.id);
+                          localStorage.setItem(SK, JSON.stringify(updated));
+                          setHistory(updated);
+                        }
+                      }}
+                      style={{flex:1,padding:"8px",background:"transparent",border:"none",
+                        cursor:"pointer",color:"#880000",fontFamily:"Georgia,serif",
+                        fontSize:13,fontWeight:"bold"}}>
+                      🗑 Eliminar
+                    </button>
                   </div>
                 </div>
               ))
@@ -1790,6 +2195,19 @@ export default function App() {
             </button>
           </div>
         </div>
+      )}
+      {/* Edit match modal */}
+      {editMatch && (
+        <EditMatchScreen
+          match={editMatch}
+          onSave={(updated)=>{
+            const newHistory = history.map(m=>m.id===updated.id?updated:m);
+            localStorage.setItem(SK, JSON.stringify(newHistory));
+            setHistory(newHistory);
+            setEditMatch(null);
+          }}
+          onClose={()=>setEditMatch(null)}
+        />
       )}
     </>
   );
