@@ -626,6 +626,34 @@ function LiveScreen({ matchData, onEnd }) {
   const [generatingPdf, setGeneratingPdf] = useState(false);
 
   const allP = matchData.players;
+
+  // ── Smart squad tracking ───────────────────────────────
+  // Returns the 11 players currently on the field
+  const getPlayersOnField = () => {
+    const onField = new Set(matchData.starters.map(p => p.name));
+    const expelled = new Set();
+    events.forEach(ev => {
+      if (ev.type === "sub") {
+        onField.delete(ev.out?.name);
+        onField.add(ev.in?.name);
+      }
+      if (ev.type === "red") expelled.add(ev.player?.name);
+    });
+    expelled.forEach(n => onField.delete(n));
+    return allP.filter(p => onField.has(p.name));
+  };
+
+  // Returns players NOT yet on field (available to come in)
+  const getAvailableSubs = () => {
+    const havePlayed = new Set();
+    matchData.starters.forEach(p => havePlayed.add(p.name));
+    events.forEach(ev => {
+      if (ev.type === "sub") {
+        havePlayed.add(ev.in?.name);
+      }
+    });
+    return allP.filter(p => !havePlayed.has(p.name));
+  };
   const addEv = (type,data) => setEvents(prev=>[...prev,{id:Date.now(),type,...data}]);
 
   // Goal flow: player → zone → assist → minute
@@ -790,8 +818,8 @@ function LiveScreen({ matchData, onEnd }) {
       {modal==="rp" && <PlayerSelect players={allP} label="🟥 Roja a..." onSelect={onRP} onClose={()=>setModal(null)}/>}
       {modal==="rm" && <MinuteInput autoMin={timer.matchMin} label="🟥 Minuto roja" onConfirm={onRM} onClose={()=>setModal(null)}/>}
       {modal==="ip" && <PlayerSelect players={allP} label="🚑 ¿Quién se lesionó?" onSelect={onIP} onClose={()=>setModal(null)}/>}
-      {modal==="so" && <PlayerSelect players={matchData.starters} label="🔄 ¿Quién sale?" onSelect={onSO} onClose={()=>setModal(null)}/>}
-      {modal==="si" && <PlayerSelect players={matchData.subs} label="🔄 ¿Quién entra?" onSelect={onSI} onClose={()=>setModal(null)}/>}
+      {modal==="so" && <PlayerSelect players={getPlayersOnField()} label="🔄 ¿Quién sale?" onSelect={onSO} onClose={()=>setModal(null)}/>}
+      {modal==="si" && <PlayerSelect players={getAvailableSubs()} label="🔄 ¿Quién entra?" onSelect={onSI} onClose={()=>setModal(null)}/>}
       {modal==="ht" && <HalfTimeModal onConfirm={handleHalfTime} onClose={()=>setModal(null)}/>}
       {modal==="t2" && (
         <Overlay>
