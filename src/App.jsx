@@ -10,73 +10,62 @@ const G = {
 const POSITIONS = ["POR","DEF","LAT","MED","EXT","DEL"];
 const T1_CLOCK = 45;
 
-// ── Timer (Web Worker + Wake Lock) ─────────────────────
+// ── Timer (timestamp-based — survives screen lock) ──────
 function useTimer() {
   const [running, setRunning] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [half, setHalf] = useState(1);
-  const workerRef = useRef(null);
-  const wakeLockRef = useRef(null);
+  const intervalRef = useRef(null);
+  const startTsRef  = useRef(null); // timestamp when started
+  const baseSecsRef = useRef(0);    // seconds accumulated before this start
 
-  // Init worker once
-  useEffect(() => {
-    workerRef.current = new Worker("/timer-worker.js");
-    workerRef.current.onmessage = (e) => {
-      if (e.data.type === "TICK") setSeconds(e.data.seconds);
-    };
-    return () => {
-      workerRef.current?.terminate();
-      wakeLockRef.current?.release();
-    };
+  const tick = useCallback(() => {
+    if (startTsRef.current === null) return;
+    const elapsed = Math.floor((Date.now() - startTsRef.current) / 1000);
+    setSeconds(baseSecsRef.current + elapsed);
   }, []);
-
-  // Wake Lock — keeps screen on while timer runs
-  const requestWakeLock = async () => {
-    try {
-      if ("wakeLock" in navigator) {
-        wakeLockRef.current = await navigator.wakeLock.request("screen");
-      }
-    } catch (e) { console.log("Wake Lock not available:", e); }
-  };
-
-  const releaseWakeLock = () => {
-    wakeLockRef.current?.release();
-    wakeLockRef.current = null;
-  };
-
-  // Re-acquire wake lock if page becomes visible again
-  useEffect(() => {
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible" && running) requestWakeLock();
-    };
-    document.addEventListener("visibilitychange", handleVisibility);
-    return () => document.removeEventListener("visibilitychange", handleVisibility);
-  }, [running]);
 
   const start = useCallback(() => {
     if (!running) {
+      startTsRef.current = Date.now();
       setRunning(true);
-      workerRef.current?.postMessage({ type: "START" });
-      requestWakeLock();
+      intervalRef.current = setInterval(tick, 500); // 500ms for accuracy
     }
-  }, [running]);
+  }, [running, tick]);
 
   const pause = useCallback(() => {
+    // Save accumulated seconds before pausing
+    if (startTsRef.current !== null) {
+      baseSecsRef.current += Math.floor((Date.now() - startTsRef.current) / 1000);
+      startTsRef.current = null;
+    }
     setRunning(false);
-    workerRef.current?.postMessage({ type: "PAUSE" });
-    releaseWakeLock();
+    clearInterval(intervalRef.current);
   }, []);
 
   const secondHalf = useCallback(() => {
+    clearInterval(intervalRef.current);
+    startTsRef.current = null;
+    baseSecsRef.current = 0;
     setRunning(false);
-    workerRef.current?.postMessage({ type: "PAUSE" });
-    workerRef.current?.postMessage({ type: "RESET" });
     setSeconds(0);
     setHalf(2);
-    releaseWakeLock();
   }, []);
 
-  const mins = Math.floor(seconds/60);
+  // When app comes back from background, recalculate elapsed time
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible" && running && startTsRef.current !== null) {
+        tick(); // immediate recalculation
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => document.removeEventListener("visibilitychange", handleVisibility);
+  }, [running, tick]);
+
+  useEffect(() => () => clearInterval(intervalRef.current), []);
+
+  const mins = Math.floor(seconds / 60);
   const display = `${String(mins).padStart(2,"0")}:${String(seconds%60).padStart(2,"0")}`;
   const matchMin = Math.max(1, mins+1) + (half===2 ? 45 : 0);
   return { running, display, matchMin, half, start, pause, secondHalf };
@@ -711,8 +700,18 @@ function LiveScreen({ matchData, onEnd }) {
   const addEv = (type,data) => setEvents(prev=>[...prev,{id:Date.now(),type,...data}]);
 
   // Goal flow: player → zone → assist → minute
-  const onGP = p => { setPending({player:p}); setModal("gz"); };
-  const onGZ = (id,label) => { setPending(v=>({...v,zone:id,zoneLabel:label})); setModal("ga"); };
+  const onGP = p => {
+    setPending({player:p});
+    // Rival goal: skip zone and assist, go straight to minute
+    if (p.isOpponent) setModal("gm");
+    else setModal("gz");
+  };
+  const onGZ = (id,label) => {
+    setPending(v=>({...v,zone:id,zoneLabel:label}));
+    // Skip assist for opponent goals
+    if (pending.player?.isOpponent) setModal("gm");
+    else setModal("ga");
+  };
   const onGA = assist => { setPending(v=>({...v,assist})); setModal("gm"); };
   const onGM = min => {
     const opp=pending.player?.isOpponent;
@@ -858,14 +857,14 @@ function LiveScreen({ matchData, onEnd }) {
       </div>
 
       {/* Modals */}
-      {modal==="gp" && <PlayerSelect players={allP} label="⚽ ¿Quién hizo el gol?" onSelect={onGP} onClose={()=>setModal(null)}
+      {modal==="gp" && <PlayerSelect players={getPlayersOnField()} label="⚽ ¿Quién hizo el gol?" onSelect={onGP} onClose={()=>setModal(null)}
         extra={<button onClick={()=>onGP({name:`Gol ${matchData.rival}`,isOpponent:true})}
           style={{display:"block",width:"100%",padding:"11px 12px",marginBottom:7,background:"#880000",
             color:"white",border:"none",borderRadius:9,cursor:"pointer",fontFamily:"Georgia,serif",fontSize:14}}>
           ⚽ Gol del rival
         </button>}/>}
       {modal==="gz" && <ZonePicker onSelect={onGZ} onClose={()=>setModal(null)}/>}
-      {modal==="ga" && <AssistSelect players={allP.filter(p=>p.name!==pending.player?.name)} onSelect={onGA} onClose={()=>setModal(null)}/>}
+      {modal==="ga" && !pending.player?.isOpponent && <AssistSelect players={getPlayersOnField().filter(p=>p.name!==pending.player?.name)} onSelect={onGA} onClose={()=>setModal(null)}/>}
       {modal==="gm" && <MinuteInput autoMin={timer.matchMin} label="⚽ Minuto del gol" onConfirm={onGM} onClose={()=>setModal(null)}/>}
       {modal==="yp" && <PlayerSelect players={allP} label="🟨 Amarilla a..." onSelect={onYP} onClose={()=>setModal(null)}/>}
       {modal==="ym" && <MinuteInput autoMin={timer.matchMin} label="🟨 Minuto amarilla" onConfirm={onYM} onClose={()=>setModal(null)}/>}
