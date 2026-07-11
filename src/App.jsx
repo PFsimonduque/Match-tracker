@@ -307,7 +307,7 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
 
   // Score
   setFont(32,"bold"); setTxt(WHITE);
-  doc.text(`${score[0]}  —  ${score[1]}`, PW/2, y+18, {align:"center"});
+  doc.text(score[0] + "  -  " + score[1], PW/2, y+18, {align:"center"});
   setFont(8,"normal"); setTxt([170,170,170]);
   doc.text("Resultado Final", PW/2, y+22, {align:"center"});
 
@@ -345,10 +345,10 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
       doc.text(g.isOpponent ? matchData.rival : (g.player?.name||""), ML+17, rowY+3.5);
       if (!g.isOpponent && g.zone) {
         setFont(8,"normal"); setTxt(GRAY);
-        doc.text(`— ${g.zone}`, ML+17 + doc.getTextWidth((g.player?.name||"")+"  "), rowY+3.5);
+        doc.text(`- ${g.zone}`, ML+17 + doc.getTextWidth((g.player?.name||"")+"  "), rowY+3.5);
       }
       setFont(7.5,"normal"); setTxt([50,68,85]);
-      const at = g.assist ? `🎯 Asistencia: ${g.assist.name}` : "Sin asistencia";
+      const at = g.assist ? `Asist: ${g.assist.name}` : "Sin asistencia";
       doc.text(at, ML+17, rowY+8);
       if (i < goals.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(ML+4, rowY+10.5, ML+CW-4, rowY+10.5); }
     });
@@ -373,7 +373,7 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
     setFont(7.5,"bold"); setTxt(fg);
     doc.text(`${e.minute}'`, ML+9.5, ry2+0.8, {align:"center"});
     setFont(8.5,"normal"); setTxt(BLACK);
-    doc.text(`${e.card==="Y"?"🟨":"🟥"} ${e.player?.name||""}`, ML+17, ry2+0.8);
+    doc.text(`${e.card==="Y"?"Amarilla":"Roja"}: ${e.player?.name||""}`, ML+17, ry2+0.8);
     if (i < yellows.length+reds.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(ML+4, ry2+4, ML+HALF-4, ry2+4); }
   });
 
@@ -387,12 +387,14 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
     setFill(BLUE); doc.roundedRect(SX+4, ry2-3, 11, 5, 1.5,1.5,"F");
     setFont(7.5,"bold"); setTxt(WHITE);
     doc.text(`${s.minute}'`, SX+9.5, ry2+0.8, {align:"center"});
-    setFont(8.5,"bold"); setTxt(RED);
-    doc.text(`⬇ ${s.out?.name||""}`, SX+17, ry2+0.8);
+    setFont(8.5,"normal"); setTxt(RED);
+    doc.text(`Sale: ${s.out?.name||""}`, SX+17, ry2+0.8);
+    const outW = doc.getTextWidth(`Sale: ${s.out?.name||""}`);
     setFont(8.5,"normal"); setTxt(GRAY);
-    doc.text(" → ", SX+17+doc.getTextWidth(`⬇ ${s.out?.name||""}`), ry2+0.8);
-    setFont(8.5,"bold"); setTxt(GREEN);
-    doc.text(`⬆ ${s.in?.name||""}`, SX+17+doc.getTextWidth(`⬇ ${s.out?.name||""}`) + doc.getTextWidth(" → "), ry2+0.8);
+    doc.text(" > ", SX+17+outW, ry2+0.8);
+    const arrW = doc.getTextWidth(" > ");
+    setFont(8.5,"normal"); setTxt(GREEN);
+    doc.text(`Entra: ${s.in?.name||""}`, SX+17+outW+arrW, ry2+0.8);
     if (i < subs.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(SX+4, ry2+4, SX+HALF-4, ry2+4); }
   });
   y += tcH + 4;
@@ -511,7 +513,7 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
     setFont(8.5,"bold"); setTxt(BLACK);
     doc.text(s.name, ML+5, ry2+2.5);
     setFont(8.5,"normal"); setTxt(GRAY);
-    doc.text(`— ${s.role}`, ML+5+doc.getTextWidth(s.name)+3, ry2+2.5);
+    doc.text(`- ${s.role}`, ML+5+doc.getTextWidth(s.name)+3, ry2+2.5);
     if (i < matchData.staff.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(ML+4, ry2+5.5, ML+CW-4, ry2+5.5); }
   });
   y += staffH + 5;
@@ -520,7 +522,7 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
   setStroke(BORDER); doc.setLineWidth(0.4);
   doc.line(ML, y, ML+CW, y);
   setFont(8,"normal"); setTxt(GRAY);
-  doc.text("PF Simón Duque Villegas · Atlético Nacional", PW/2, y+5, {align:"center"});
+  doc.text("PF Simon Duque Villegas - Atletico Nacional", PW/2, y+5, {align:"center"});
 
   // Save
   const fname = `Informe_AN_vs_${matchData.rival.replace(/\s+/g,"_")}.pdf`;
@@ -1456,11 +1458,11 @@ async function generateAccumPDF(history) {
   const lastMatch = matches[matches.length-1];
   const firstMatch = matches[0];
   if (firstMatch && lastMatch)
-    doc.text(`${firstMatch.date||""} → ${lastMatch.date||""}`, PW/2, y+31, {align:"center"});
+    doc.text(`${firstMatch.date||""} al ${lastMatch.date||""}`, PW/2, y+31, {align:"center"});
   y += 40;
 
   // ── RESULTADOS (tabla compacta) ─────────────────────────
-  let ry = secHdr(ML,y,CW,"📋","Resultados");
+  let ry = secHdr(ML,y,CW,"RES","Resultados");
   setFill(WHITE); setStroke(BORDER); doc.rect(ML,y,CW,matches.length*7+10,"FD");
   // Header
   setFont(7.5,"bold"); setTxt(GRAY);
@@ -1479,7 +1481,7 @@ async function generateAccumPDF(history) {
     doc.text(m.tournament||"",   ML+52, rowY+2.5);
     doc.text(m.date||"",         ML+100,rowY+2.5);
     setFont(8,"bold"); setTxt(resColor);
-    doc.text(`${m.scoreAN}–${m.scoreRv} ${resLabel}`, ML+130, rowY+2.5);
+    doc.text(`${m.scoreAN}-${m.scoreRv} ${resLabel}`, ML+130, rowY+2.5);
     if (i<matches.length-1){ setStroke([238,238,238]); doc.setLineWidth(0.2); doc.line(ML+3,rowY+4.8,ML+CW-3,rowY+4.8); }
   });
   y += matches.length*7 + 14;
@@ -1493,7 +1495,7 @@ async function generateAccumPDF(history) {
   const pb=20, cih=chartH-pb-6;
   const chartLeft=ML+CHART_ML;
 
-  let mh = secHdr(ML,y,CW,"⏱","Minutos Jugados Acumulados");
+  let mh = secHdr(ML,y,CW,"MIN","Minutos Jugados Acumulados");
   setFill(WHITE); setStroke(BORDER); doc.rect(ML,y,CW,chartH+12,"FD");
   const cBaseY = mh+cih;
   [25,50,100,200,300,500,maxMins].forEach(val=>{
@@ -1533,7 +1535,7 @@ async function generateAccumPDF(history) {
     const rows = Math.max(data.length,1);
     let py = secHdr(sx,sy,sw,icon,title);
     setFill(WHITE); setStroke(BORDER); doc.rect(sx,sy,sw,rows*9+10,"FD");
-    if (data.length===0) { setFont(8,"normal"); setTxt(GRAY); doc.text("—",sx+6,py+5); return sy+rows*9+14; }
+    if (data.length===0) { setFont(8,"normal"); setTxt(GRAY); doc.text("-",sx+6,py+5); return sy+rows*9+14; }
     data.forEach((p,i)=>{
       const ry2=py+i*9+1;
       const mc=podiumColors[i]||[100,100,100];
@@ -1555,7 +1557,7 @@ async function generateAccumPDF(history) {
   const grpW = rcW / rangeKeys.length;
   const barW = grpW * 0.28;
 
-  let rhy = secHdr(ML,y,CW,"🕐","Distribución de Goles por Franja de 15 min");
+  let rhy = secHdr(ML,y,CW,"GOLES x FRANJA","Distribucion de Goles por Franja de 15 min");
   setFill(WHITE); setStroke(BORDER); doc.rect(ML,y,CW,rcH+10,"FD");
   const rcBaseY = rhy + rcCH;
 
@@ -1587,18 +1589,18 @@ async function generateAccumPDF(history) {
   y += rcH + 14;
 
   const maxPH = Math.max(allGoals.length, allAssists.length)*9+14;
-  drawPodium(ML,    y, HALF, "⚽","Goleadores",    allGoals,   "goals");
-  drawPodium(ML+HALF+4, y, HALF, "🎯","Asistencias",allAssists,"assists");
+  drawPodium(ML,    y, HALF, "GOL","Goleadores",    allGoals,   "goals");
+  drawPodium(ML+HALF+4, y, HALF, "ASI","Asistencias",allAssists,"assists");
   y += maxPH + 2;
 
   const maxCH = Math.max(allYellows.length, allReds.length)*9+14;
-  drawPodium(ML,        y, HALF, "🟨","Amarillas",  allYellows,"yellows");
-  drawPodium(ML+HALF+4, y, HALF, "🟥","Rojas",      allReds,   "reds");
+  drawPodium(ML,        y, HALF, "AMA","Amarillas",  allYellows,"yellows");
+  drawPodium(ML+HALF+4, y, HALF, "ROJ","Rojas",      allReds,   "reds");
   y += maxCH + 2;
 
   // ── TABLA COMPLETA JUGADORES ────────────────────────────
   const allSorted=[...players].filter(p=>p.appearances>0).sort((a,b)=>b.mins-a.mins);
-  let ty = secHdr(ML,y,CW,"👤","Estadísticas Individuales");
+  let ty = secHdr(ML,y,CW,"JUG","Estadísticas Individuales");
   setFill(WHITE); setStroke(BORDER); doc.rect(ML,y,CW,allSorted.length*8+16,"FD");
   // Table header
   setFont(7.5,"bold"); setTxt(GRAY);
@@ -1629,7 +1631,7 @@ async function generateAccumPDF(history) {
   // ── FOOTER ──────────────────────────────────────────────
   setStroke(BORDER); doc.setLineWidth(0.4); doc.line(ML,y,ML+CW,y);
   setFont(8,"normal"); setTxt(GRAY);
-  doc.text("PF Simón Duque Villegas · Atlético Nacional", PW/2, y+5, {align:"center"});
+  doc.text("PF Simon Duque Villegas - Atletico Nacional", PW/2, y+5, {align:"center"});
 
   // Multi-page support
   doc.save("Informe_Acumulado_AN.pdf");
