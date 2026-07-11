@@ -1148,12 +1148,33 @@ function ReportScreen({ matchData, score, events, t1Real, t2Real, onBack, onNewM
 
 // ── Edit Match Screen ───────────────────────────────────
 function EditMatchScreen({ match, onSave, onClose }) {
-  const [score, setScore] = useState([...match.score]);
+  const [score, setScore]   = useState([...match.score]);
   const [events, setEvents] = useState([...match.events]);
-  const [modal, setModal] = useState(null);
+  const [modal, setModal]   = useState(null);
   const [pending, setPending] = useState({});
+  const [tab, setTab]       = useState("eventos"); // eventos | jugadores | staff
 
-  const allP = match.matchData.players || [];
+  // Players editable lists
+  const [starters, setStarters] = useState(
+    (match.matchData.starters||[]).map(p=>({...p}))
+  );
+  const [subs, setSubs] = useState(
+    (match.matchData.subs||[]).map(p=>({...p}))
+  );
+  // Staff editable list
+  const [staff, setStaff] = useState(
+    (match.matchData.staff||[]).map(s=>({...s}))
+  );
+
+  // New player form
+  const [newP, setNewP] = useState({name:"",number:"",pos:"",type:"titular"});
+  // New staff form
+  const [newS, setNewS] = useState({name:"",role:""});
+
+  const allP = [
+    ...starters.map(p=>({...p,type:"titular"})),
+    ...subs.map(p=>({...p,type:"suplente"})),
+  ];
 
   const removeEvent = (id) => setEvents(prev => prev.filter(e => e.id !== id));
 
@@ -1223,6 +1244,173 @@ function EditMatchScreen({ match, onSave, onClose }) {
         </div>
 
         <div style={{padding:20}}>
+
+          {/* Tabs */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:16}}>
+            {[
+              {id:"eventos",  label:"📋 Eventos"},
+              {id:"jugadores",label:"👥 Jugadores"},
+              {id:"staff",    label:"👔 Cuerpo Técnico"},
+            ].map(t=>(
+              <button key={t.id} onClick={()=>setTab(t.id)}
+                style={{padding:"9px 4px",border:"none",borderRadius:8,cursor:"pointer",
+                  fontFamily:"Georgia,serif",fontSize:12,fontWeight:"bold",
+                  background: tab===t.id ? G.greenDark : "#f0f0f0",
+                  color: tab===t.id ? "white" : G.greenDark}}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          {/* ── TAB: JUGADORES ── */}
+          {tab==="jugadores" && (
+            <div>
+              {/* Agregar jugador */}
+              <div style={{background:"#f0fff0",borderRadius:12,padding:14,marginBottom:14,
+                border:"1px solid #c8e6c9"}}>
+                <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",color:G.greenDark,
+                  fontSize:13,marginBottom:10}}>➕ Agregar jugador</div>
+                <div style={{display:"grid",gridTemplateColumns:"50px 1fr 70px",gap:6,marginBottom:8}}>
+                  <input placeholder="#" value={newP.number}
+                    onChange={e=>setNewP(v=>({...v,number:e.target.value}))}
+                    style={{padding:"8px",border:"1px solid #ddd",borderRadius:7,
+                      fontSize:14,textAlign:"center",fontFamily:"Georgia,serif"}}/>
+                  <input placeholder="Nombre del jugador" value={newP.name}
+                    onChange={e=>setNewP(v=>({...v,name:e.target.value}))}
+                    style={{padding:"8px",border:"1px solid #ddd",borderRadius:7,
+                      fontSize:14,fontFamily:"Georgia,serif"}}/>
+                  <select value={newP.pos} onChange={e=>setNewP(v=>({...v,pos:e.target.value}))}
+                    style={{padding:"8px",border:"1px solid #ddd",borderRadius:7,
+                      fontSize:13,fontFamily:"Georgia,serif"}}>
+                    <option value="">Pos</option>
+                    {POSITIONS.map(p=><option key={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6,marginBottom:8}}>
+                  <select value={newP.type} onChange={e=>setNewP(v=>({...v,type:e.target.value}))}
+                    style={{padding:"8px",border:"1px solid #ddd",borderRadius:7,
+                      fontSize:13,fontFamily:"Georgia,serif"}}>
+                    <option value="titular">Titular</option>
+                    <option value="suplente">Suplente</option>
+                  </select>
+                  <button onClick={()=>{
+                    if(!newP.name.trim()) return;
+                    if(newP.type==="titular") setStarters(s=>[...s,{...newP}]);
+                    else setSubs(s=>[...s,{...newP}]);
+                    setNewP({name:"",number:"",pos:"",type:"titular"});
+                  }} style={{padding:"8px",background:G.greenDark,color:"white",border:"none",
+                    borderRadius:7,cursor:"pointer",fontFamily:"Georgia,serif",
+                    fontSize:14,fontWeight:"bold"}}>
+                    + Agregar
+                  </button>
+                </div>
+              </div>
+
+              {/* Titulares */}
+              <div style={{marginBottom:14}}>
+                <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",color:G.greenDark,
+                  fontSize:13,marginBottom:8}}>🟢 Titulares ({starters.length})</div>
+                {starters.map((p,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,
+                    padding:"7px 10px",marginBottom:5,background:"#f6fff6",
+                    borderRadius:8,border:"1px solid #d4ecd4"}}>
+                    {p.number&&<span style={{background:G.greenDark,color:"white",
+                      borderRadius:4,padding:"1px 6px",fontWeight:"bold",fontSize:11,
+                      minWidth:22,textAlign:"center"}}>{p.number}</span>}
+                    <span style={{fontFamily:"Georgia,serif",fontSize:13,flex:1}}>{p.name}</span>
+                    {p.pos&&<span style={{color:G.greenDark,fontSize:11,fontWeight:"bold"}}>{p.pos}</span>}
+                    <button onClick={()=>setStarters(s=>s.filter((_,j)=>j!==i))}
+                      style={{background:"#ffeeee",border:"1px solid #ffcccc",color:"#cc0000",
+                        borderRadius:5,padding:"3px 7px",cursor:"pointer",fontSize:12}}>
+                      🗑
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Suplentes */}
+              <div>
+                <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",color:"#003366",
+                  fontSize:13,marginBottom:8}}>🔵 Suplentes ({subs.length})</div>
+                {subs.map((p,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,
+                    padding:"7px 10px",marginBottom:5,background:"#f5f8ff",
+                    borderRadius:8,border:"1px solid #d0dcf0"}}>
+                    {p.number&&<span style={{background:"#003366",color:"white",
+                      borderRadius:4,padding:"1px 6px",fontWeight:"bold",fontSize:11,
+                      minWidth:22,textAlign:"center"}}>{p.number}</span>}
+                    <span style={{fontFamily:"Georgia,serif",fontSize:13,flex:1}}>{p.name}</span>
+                    {p.pos&&<span style={{color:"#003366",fontSize:11,fontWeight:"bold"}}>{p.pos}</span>}
+                    <button onClick={()=>setSubs(s=>s.filter((_,j)=>j!==i))}
+                      style={{background:"#ffeeee",border:"1px solid #ffcccc",color:"#cc0000",
+                        borderRadius:5,padding:"3px 7px",cursor:"pointer",fontSize:12}}>
+                      🗑
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB: CUERPO TÉCNICO ── */}
+          {tab==="staff" && (
+            <div>
+              {/* Agregar miembro */}
+              <div style={{background:"#f0fff0",borderRadius:12,padding:14,marginBottom:14,
+                border:"1px solid #c8e6c9"}}>
+                <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",color:G.greenDark,
+                  fontSize:13,marginBottom:10}}>➕ Agregar miembro</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 100px",gap:6,marginBottom:8}}>
+                  <input placeholder="Nombre" value={newS.name}
+                    onChange={e=>setNewS(v=>({...v,name:e.target.value}))}
+                    style={{padding:"8px",border:"1px solid #ddd",borderRadius:7,
+                      fontSize:14,fontFamily:"Georgia,serif"}}/>
+                  <input placeholder="Cargo" value={newS.role}
+                    onChange={e=>setNewS(v=>({...v,role:e.target.value}))}
+                    style={{padding:"8px",border:"1px solid #ddd",borderRadius:7,
+                      fontSize:14,fontFamily:"Georgia,serif"}}/>
+                </div>
+                <button onClick={()=>{
+                  if(!newS.name.trim()) return;
+                  setStaff(s=>[...s,{...newS}]);
+                  setNewS({name:"",role:""});
+                }} style={{width:"100%",padding:"9px",background:G.greenDark,color:"white",
+                  border:"none",borderRadius:7,cursor:"pointer",fontFamily:"Georgia,serif",
+                  fontSize:14,fontWeight:"bold"}}>
+                  + Agregar
+                </button>
+              </div>
+
+              {/* Staff list */}
+              <div>
+                <div style={{fontFamily:"Georgia,serif",fontWeight:"bold",color:G.greenDark,
+                  fontSize:13,marginBottom:8}}>👔 Miembros ({staff.length})</div>
+                {staff.length===0 && <p style={{color:"#bbb",fontSize:13}}>Sin miembros</p>}
+                {staff.map((s,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:8,
+                    padding:"8px 10px",marginBottom:6,background:"#f9f9f9",
+                    borderRadius:8,border:"1px solid #eee"}}>
+                    <div style={{flex:1}}>
+                      <span style={{fontFamily:"Georgia,serif",fontSize:13,fontWeight:"bold"}}>
+                        {s.name}
+                      </span>
+                      {s.role&&<span style={{color:"#888",fontSize:12,marginLeft:6}}>
+                        — {s.role}
+                      </span>}
+                    </div>
+                    <button onClick={()=>setStaff(st=>st.filter((_,j)=>j!==i))}
+                      style={{background:"#ffeeee",border:"1px solid #ffcccc",color:"#cc0000",
+                        borderRadius:5,padding:"3px 7px",cursor:"pointer",fontSize:12}}>
+                      🗑
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* ── TAB: EVENTOS ── */}
+          {tab==="eventos" && (<div>
           {/* Score editor */}
           <div style={{background:"#f0fff0",borderRadius:12,padding:16,marginBottom:16,
             border:"1px solid #c8e6c9"}}>
@@ -1305,8 +1493,24 @@ function EditMatchScreen({ match, onSave, onClose }) {
             ))}
           </div>
 
+          </div>)}
+
           {/* Save */}
-          <button onClick={()=>onSave({...match,score,events})}
+          <button onClick={()=>onSave({
+              ...match,
+              score,
+              events,
+              matchData:{
+                ...match.matchData,
+                starters,
+                subs,
+                staff,
+                players: [
+                  ...starters.map(p=>({...p,type:"titular"})),
+                  ...subs.map(p=>({...p,type:"suplente"})),
+                ],
+              }
+            })}
             style={{width:"100%",padding:14,background:"linear-gradient(135deg,#004400,#008800)",
               color:"white",border:"none",borderRadius:10,cursor:"pointer",
               fontFamily:"Georgia,serif",fontWeight:"bold",fontSize:16}}>
