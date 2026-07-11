@@ -227,12 +227,12 @@ function HalfTimeModal({ onConfirm, onClose }) {
   );
 }
 
-// ── PDF Generator ───────────────────────────────────────
+// ── PDF Generator (altura dinámica, escudo con proxy CORS, portada y leyenda corregidas) ─
+
 async function generatePDF(matchData, score, events, t1Real, t2Real) {
   const { jsPDF } = window.jspdf;
-  const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:"a4" });
-  const PW = 210, PH = 297;
-  const ML = 11, MR = 11, MT = 10;
+  const PW = 210;
+  const ML = 11, MR = 11, MT = 10, MB = 10;
   const CW = PW - ML - MR;
   const HALF = (CW - 4) / 2;
 
@@ -248,8 +248,52 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
   const WHITE   = [255,255,255];
   const BLACK   = [26,26,26];
   const BORDER  = [221,221,221];
-  const TITBG   = [240,255,240];
-  const SUBBG   = [240,244,255];
+
+  // ── 1) Pre-calcular datos (se necesitan ANTES de crear el PDF,
+  //       para poder medir cuánta página hace falta) ─────────────
+  const goals   = events.filter(e=>e.type==="goal");
+  const yellows = events.filter(e=>e.type==="yellow");
+  const reds    = events.filter(e=>e.type==="red");
+  const subs    = events.filter(e=>e.type==="sub");
+
+  const t1R = t1Real || 45;
+  const t2R = t2Real || 45;
+  const allWithMins = matchData.players.map(p=>({
+    ...p, mins: calcMins(p.name, p.type, events, t1R, t2R)
+  })).filter(p=>p.mins!==null).sort((a,b)=>b.mins-a.mins);
+  const maxMins = Math.max(...allWithMins.map(p=>p.mins), 1);
+  const nBars = Math.max(allWithMins.length, 1);
+
+  // ── 2) Fórmulas de altura de cada sección (las mismas fórmulas se
+  //       usan para medir la página Y para dibujar, así siempre coinciden) ──
+  const COVER_H = 40;
+  const goalsBoxH  = 8 + (goals.length>0 ? goals.length*12+3 : 9);
+  const goalsGapH  = goalsBoxH + 4;
+
+  const cardsSubsBoxH = Math.max(
+    Math.max((yellows.length+reds.length)*9+12, 18),
+    Math.max(subs.length*9+12, 18)
+  );
+  const cardsSubsGapH = cardsSubsBoxH + 4;
+
+  const CHART_H = 50;                 // alto "físico" del gráfico (igual que antes)
+  const CHART_BOX_H = CHART_H + 12;   // caja completa del gráfico
+  const chartGapH = CHART_H + 16;     // avance en Y tras el gráfico (deja 4mm libres)
+
+  const lineupBoxH = Math.max(matchData.starters.length*8+14, matchData.subs.length*8+14);
+  const lineupGapH = lineupBoxH + 4;
+
+  const staffBoxH = matchData.staff.length*8 + 14;
+  const staffGapH = staffBoxH + 5;
+
+  const FOOTER_H = 12;
+
+  const totalH = MT + COVER_H + 4 + goalsGapH + cardsSubsGapH + chartGapH
+               + lineupGapH + staffGapH + FOOTER_H + MB;
+
+  // ── 3) Crear el PDF con la ALTURA EXACTA que necesita el contenido
+  //       (ya no es A4 fijo, así nunca se corta nada) ────────────
+  const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:[PW, totalH] });
 
   let y = MT;
 
@@ -257,14 +301,14 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
   const setStroke = c => doc.setDrawColor(...c);
   const setTxt    = c => doc.setTextColor(...c);
   const setFont   = (s,w="normal") => { doc.setFontSize(s); doc.setFont("helvetica",w); };
+  const rRect = (x,ry,w,h,r,fill=true,stroke=false) => doc.roundedRect(x,ry,w,h,r,r,fill&&stroke?"FD":fill?"F":"S");
 
-  // Rounded rect helper
-  const rRect = (x,ry,w,h,r,fill=true,stroke=false) => {
-    doc.roundedRect(x,ry,w,h,r,r,fill&&stroke?"FD":fill?"F":"S");
-  };
-
-  // Section header
-  const secHeader = (rx,ry,w,icon,title) => {
+  // Dibuja PRIMERO la caja de contenido y DESPUÉS la barra del título
+  // encima. (Antes se dibujaba el título y luego una caja blanca por
+  // arriba que lo tapaba — por eso "faltaban" títulos/espacio.)
+  const section = (rx,ry,w,h,icon,title) => {
+    setFill(WHITE); setStroke(BORDER); doc.setLineWidth(0.3);
+    doc.rect(rx,ry,w,h,"FD");
     setFill(WHITE); setStroke(BORDER);
     rRect(rx,ry,w,7,2);
     setFont(9.5,"bold"); setTxt(GREEN);
@@ -280,12 +324,35 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
     doc.text(`${min}'`, x+5.5, by+0.8, {align:"center"});
   };
 
-  // ── Load images ───────────────────────────────────────
-  const loadImg = src => new Promise(res => {
-    const img = new Image(); img.crossOrigin="anonymous";
-    img.onload = () => { const c=document.createElement("canvas"); c.width=img.width; c.height=img.height; c.getContext("2d").drawImage(img,0,0); res(c.toDataURL("image/png")); };
-    img.onerror = () => res(null);
-    img.src = src;
+  // ── 4) Cargador de imágenes robusto (arregla el escudo AN) ─────
+  //    - Prueba la URL tal cual.
+  //    - Si el canvas se "mancha" por CORS (típico con Wikipedia), o
+  //      la imagen falla, reintenta a través de un proxy que sí
+  //      entrega cabeceras CORS válidas.
+  //    - Si de verdad no hay forma, sigue sin romper el PDF.
+  const loadImg = (src) => new Promise(resolve => {
+    if (!src) return resolve(null);
+    const tryLoad = (url, onFail) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        try {
+          const c = document.createElement("canvas");
+          c.width = img.naturalWidth || img.width;
+          c.height = img.naturalHeight || img.height;
+          c.getContext("2d").drawImage(img,0,0);
+          resolve(c.toDataURL("image/png"));
+        } catch (err) { onFail(); }
+      };
+      img.onerror = onFail;
+      img.src = url;
+    };
+    tryLoad(src, () => {
+      if (/^https?:\/\//i.test(src)) {
+        const proxied = `https://images.weserv.nl/?url=${encodeURIComponent(src.replace(/^https?:\/\//,""))}`;
+        tryLoad(proxied, () => resolve(null));
+      } else resolve(null);
+    });
   });
 
   const anImg = await loadImg(AN_SHIELD);
@@ -293,50 +360,44 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
 
   // ── COVER ─────────────────────────────────────────────
   setFill(BG);
-  rRect(ML, y, CW, 38, 4);
+  doc.roundedRect(ML, y, CW, COVER_H, 4, 4, "F");
 
-  // AN shield
-  if (anImg) doc.addImage(anImg,"PNG", ML+3, y+3, 14, 20);
-  // Rival logo
-  if (rvImg) doc.addImage(rvImg,"PNG", ML+CW-17, y+5, 14, 14);
+  // Tres columnas reales (izq: AN, centro: marcador, der: rival) —
+  // esto es lo que evita que el nombre del equipo se salga de la página.
+  const colW    = CW/3;
+  const leftCx  = ML + colW/2;
+  const midCx   = ML + CW/2;
+  const rightCx = ML + CW - colW/2;
 
-  // Team names
-  setFont(9.5,"bold"); setTxt([0,204,0]);
-  doc.text("Atlético Nacional", ML+10, y+26, {align:"center"});
-  if (rvImg || matchData.rival) doc.text(matchData.rival, ML+CW-10, y+26, {align:"right"});
+  if (anImg) doc.addImage(anImg,"PNG", leftCx-7, y+4, 14, 18);
+  setFont(8.5,"bold"); setTxt([0,204,0]);
+  doc.text("Atlético Nacional", leftCx, y+26, {align:"center", maxWidth: colW-4});
 
-  // Score
-  setFont(32,"bold"); setTxt(WHITE);
-  doc.text(score[0] + "  -  " + score[1], PW/2, y+18, {align:"center"});
-  setFont(8,"normal"); setTxt([170,170,170]);
-  doc.text("Resultado Final", PW/2, y+22, {align:"center"});
+  if (rvImg) doc.addImage(rvImg,"PNG", rightCx-7, y+4, 14, 14);
+  setFont(8.5,"bold"); setTxt(WHITE);
+  doc.text(matchData.rival || "Rival", rightCx, y+26, {align:"center", maxWidth: colW-4});
 
-  // Meta
-  setFont(7.5,"normal"); setTxt([180,255,180]);
+  setFont(26,"bold"); setTxt(WHITE);
+  doc.text(`${score[0]}  -  ${score[1]}`, midCx, y+17, {align:"center"});
+  setFont(7.5,"normal"); setTxt([170,170,170]);
+  doc.text("Resultado Final", midCx, y+22, {align:"center"});
+
+  setFont(7,"normal"); setTxt([180,255,180]);
   const meta = [
     matchData.tournament && `Torneo: ${matchData.tournament}`,
     matchData.jornada    && `Jornada: ${matchData.jornada}`,
     matchData.date       && `Fecha: ${matchData.date}`,
-    t1Real && t2Real     && `Duración: ${t1Real}' + ${t2Real}' = ${t1Real+t2Real}'`,
+    (t1R && t2R)          && `Duración: ${t1R}' + ${t2R}' = ${t1R+t2R}'`,
   ].filter(Boolean).join("   |   ");
-  doc.text(meta, PW/2, y+31, {align:"center", maxWidth: CW-8});
-  y += 42;
+  doc.text(meta, midCx, y+34, {align:"center", maxWidth: CW-10});
+  y += COVER_H + 4;
 
   // ── GOLES ─────────────────────────────────────────────
-  const goals   = events.filter(e=>e.type==="goal");
-  const yellows = events.filter(e=>e.type==="yellow");
-  const reds    = events.filter(e=>e.type==="red");
-  const subs    = events.filter(e=>e.type==="sub");
-  const injuries= events.filter(e=>e.type==="injury");
-
-  let gy = secHeader(ML, y, CW, "⚽", `Goles (${goals.length})`);
-  setFill(WHITE); setStroke(BORDER);
-  doc.rect(ML, y, CW, goals.length>0 ? goals.length*12+10 : 14, "FD");
+  let gy = section(ML, y, CW, goalsBoxH, "⚽", `Goles (${goals.length})`);
 
   if (goals.length===0) {
     setFont(8,"normal"); setTxt(GRAY);
     doc.text("Sin goles", ML+6, gy+5);
-    gy += 9;
   } else {
     goals.forEach((g,i) => {
       const rowY = gy + i*12 + 2;
@@ -352,78 +413,64 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
       doc.text(at, ML+17, rowY+8);
       if (i < goals.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(ML+4, rowY+10.5, ML+CW-4, rowY+10.5); }
     });
-    gy += goals.length*12 + 3;
   }
-  y = gy + 4;
+  y += goalsGapH;
 
-  // ── TARJETAS + CAMBIOS (two-col) ──────────────────────
-  const cardsH = Math.max((yellows.length+reds.length)*9+12, 18);
-  const subsH  = Math.max(subs.length*9+12, 18);
-  const tcH    = Math.max(cardsH, subsH);
+  // ── TARJETAS + CAMBIOS (dos columnas) ─────────────────
+  let cy = section(ML, y, HALF, cardsSubsBoxH, "🟨🟥", "Tarjetas");
+  const cardRows = [...yellows.map(e=>({...e,card:"Y"})), ...reds.map(e=>({...e,card:"R"}))];
+  if (cardRows.length===0) {
+    setFont(8,"normal"); setTxt(GRAY); doc.text("Sin tarjetas", ML+6, cy+5);
+  } else {
+    cardRows.forEach((e,i) => {
+      const ry2 = cy + i*9 + 2;
+      const bg = e.card==="Y" ? YELLOW : RED;
+      const fg = e.card==="Y" ? BLACK  : WHITE;
+      setFill(bg); doc.roundedRect(ML+4, ry2-3, 11, 5, 1.5,1.5,"F");
+      setFont(7.5,"bold"); setTxt(fg);
+      doc.text(`${e.minute}'`, ML+9.5, ry2+0.8, {align:"center"});
+      setFont(8.5,"normal"); setTxt(BLACK);
+      doc.text(`${e.card==="Y"?"Amarilla":"Roja"}: ${e.player?.name||""}`, ML+17, ry2+0.8);
+      if (i < cardRows.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(ML+4, ry2+4, ML+HALF-4, ry2+4); }
+    });
+  }
 
-  // Cards
-  let cy = secHeader(ML, y, HALF, "🟨🟥", "Tarjetas");
-  setFill(WHITE); setStroke(BORDER);
-  doc.rect(ML, y, HALF, tcH, "FD");
-  [...yellows.map(e=>({...e,card:"Y"})), ...reds.map(e=>({...e,card:"R"}))].forEach((e,i) => {
-    const ry2 = cy + i*9 + 2;
-    const bg = e.card==="Y" ? YELLOW : RED;
-    const fg = e.card==="Y" ? BLACK  : WHITE;
-    setFill(bg); doc.roundedRect(ML+4, ry2-3, 11, 5, 1.5,1.5,"F");
-    setFont(7.5,"bold"); setTxt(fg);
-    doc.text(`${e.minute}'`, ML+9.5, ry2+0.8, {align:"center"});
-    setFont(8.5,"normal"); setTxt(BLACK);
-    doc.text(`${e.card==="Y"?"Amarilla":"Roja"}: ${e.player?.name||""}`, ML+17, ry2+0.8);
-    if (i < yellows.length+reds.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(ML+4, ry2+4, ML+HALF-4, ry2+4); }
-  });
-
-  // Subs
   const SX = ML+HALF+4;
-  let sy = secHeader(SX, y, HALF, "🔄", "Cambios");
-  setFill(WHITE); setStroke(BORDER);
-  doc.rect(SX, y, HALF, tcH, "FD");
-  subs.forEach((s,i) => {
-    const ry2 = sy + i*9 + 2;
-    setFill(BLUE); doc.roundedRect(SX+4, ry2-3, 11, 5, 1.5,1.5,"F");
-    setFont(7.5,"bold"); setTxt(WHITE);
-    doc.text(`${s.minute}'`, SX+9.5, ry2+0.8, {align:"center"});
-    setFont(8.5,"normal"); setTxt(RED);
-    doc.text(`Sale: ${s.out?.name||""}`, SX+17, ry2+0.8);
-    const outW = doc.getTextWidth(`Sale: ${s.out?.name||""}`);
-    setFont(8.5,"normal"); setTxt(GRAY);
-    doc.text(" > ", SX+17+outW, ry2+0.8);
-    const arrW = doc.getTextWidth(" > ");
-    setFont(8.5,"normal"); setTxt(GREEN);
-    doc.text(`Entra: ${s.in?.name||""}`, SX+17+outW+arrW, ry2+0.8);
-    if (i < subs.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(SX+4, ry2+4, SX+HALF-4, ry2+4); }
-  });
-  y += tcH + 4;
+  let sy = section(SX, y, HALF, cardsSubsBoxH, "🔄", "Cambios");
+  if (subs.length===0) {
+    setFont(8,"normal"); setTxt(GRAY); doc.text("Sin cambios", SX+6, sy+5);
+  } else {
+    subs.forEach((s,i) => {
+      const ry2 = sy + i*9 + 2;
+      setFill(BLUE); doc.roundedRect(SX+4, ry2-3, 11, 5, 1.5,1.5,"F");
+      setFont(7.5,"bold"); setTxt(WHITE);
+      doc.text(`${s.minute}'`, SX+9.5, ry2+0.8, {align:"center"});
+      setFont(8.5,"normal"); setTxt(RED);
+      doc.text(`Sale: ${s.out?.name||""}`, SX+17, ry2+0.8);
+      const outW = doc.getTextWidth(`Sale: ${s.out?.name||""}`);
+      setFont(8.5,"normal"); setTxt(GRAY);
+      doc.text(" > ", SX+17+outW, ry2+0.8);
+      const arrW = doc.getTextWidth(" > ");
+      setFont(8.5,"normal"); setTxt(GREEN);
+      doc.text(`Entra: ${s.in?.name||""}`, SX+17+outW+arrW, ry2+0.8);
+      if (i < subs.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(SX+4, ry2+4, SX+HALF-4, ry2+4); }
+    });
+  }
+  y += cardsSubsGapH;
 
   // ── MINUTOS JUGADOS ───────────────────────────────────
-  const t1R = t1Real || 47;
-  const t2R = t2Real || 50;
-  const allWithMins = matchData.players.map(p=>({
-    ...p,
-    mins: calcMins(p.name, p.type, events, t1R, t2R)
-  })).filter(p=>p.mins!==null).sort((a,b)=>b.mins-a.mins);
-
-  const maxMins = Math.max(...allWithMins.map(p=>p.mins), 1);
-  const n = allWithMins.length;
-  const chartH = 50;
   const CHART_ML = 16;
   const chartW = CW - CHART_ML - 2;
-  const bw = chartW / n;
+  const bw = chartW / nBars;
   const iw = Math.min(bw*0.58, 9);
-  const pb = 20; const chartInnerH = chartH - pb - 6;
+  const pb = 20;
+  const chartInnerH = CHART_H - pb - 6;
 
-  let mh = secHeader(ML, y, CW, "⏱", `Minutos Jugados (${t1R+t2R}' — ${t1R}' + ${t2R}')`);
-  setFill(WHITE); setStroke(BORDER);
-  doc.rect(ML, y, CW, chartH+12, "FD");
+  let mh = section(ML, y, CW, CHART_BOX_H, "⏱", `Minutos Jugados (${t1R+t2R}' — ${t1R}' + ${t2R}')`);
 
   const chartBaseY = mh + chartInnerH;
   const chartLeft  = ML + CHART_ML;
 
-  // Grid lines
   [25,50,75,t1R+t2R].forEach(val => {
     if (val > maxMins+2) return;
     const lineY = chartBaseY - (val/maxMins)*chartInnerH;
@@ -440,14 +487,10 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
     const isTit = p.type==="titular";
     const bc = isTit ? GBAR : BLUE;
 
-    // Background bar
     setFill(GLIGHT); doc.rect(xb, chartBaseY-chartInnerH, iw, chartInnerH, "F");
-    // Fill
     setFill(bc); doc.rect(xb, chartBaseY-bh, iw, bh, "F");
-    // Value on top
     setFont(6,"bold"); setTxt(isTit ? GREEN : BLUE);
     doc.text(`${p.mins}'`, xc, chartBaseY-bh-1.5, {align:"center"});
-    // Number badge
     const num = p.number||"";
     if (num) {
       setFill(bc);
@@ -455,34 +498,30 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
       setFont(6,"bold"); setTxt(WHITE);
       doc.text(num, xc, chartBaseY+4.8, {align:"center"});
     }
-    // Name bold below
     const parts = p.name.split(" ");
     const display = parts.length>1 ? `${parts[0][0]}. ${parts[parts.length-1]}` : p.name;
     setFont(5.8,"bold"); setTxt(BLACK);
     doc.text(display, xc, chartBaseY+9, {align:"center"});
   });
 
-  // Axes
   setStroke(GREEN); doc.setLineWidth(0.7);
   doc.line(chartLeft, chartBaseY, chartLeft+chartW-2, chartBaseY);
   doc.line(chartLeft, chartBaseY-chartInnerH, chartLeft, chartBaseY);
 
-  // Legend
-  setFill(GBAR); doc.rect(ML+CW-30, mh+chartInnerH+9, 3, 3, "F");
-  setFont(6.5,"normal"); setTxt(BLACK); doc.text("Titular", ML+CW-26, mh+chartInnerH+11.5);
-  setFill(BLUE); doc.rect(ML+CW-17, mh+chartInnerH+9, 3, 3, "F");
-  doc.text("Suplente", ML+CW-13, mh+chartInnerH+11.5);
+  // Leyenda — reubicada bien debajo de los nombres (antes caía en la
+  // misma línea que los nombres de los jugadores y se encimaban).
+  const legendY = chartBaseY + 20;
+  setFill(GBAR); doc.rect(ML+CW-30, legendY-2, 3, 3, "F");
+  setFont(6.5,"normal"); setTxt(BLACK); doc.text("Titular", ML+CW-26, legendY+0.5);
+  setFill(BLUE); doc.rect(ML+CW-17, legendY-2, 3, 3, "F");
+  doc.text("Suplente", ML+CW-13, legendY+0.5);
 
-  y += chartH + 16;
+  y += chartGapH;
 
   // ── ALINEACIÓN + SUPLENTES ────────────────────────────
-  const startersH = matchData.starters.length*8 + 14;
-  const subsListH = matchData.subs.length*8 + 14;
-  const lineupH   = Math.max(startersH, subsListH);
-
-  const drawLineup = (players, sx, sw, bg, numBg, title, icon) => {
-    let ly = secHeader(sx, y, sw, icon, title);
-    setFill(WHITE); setStroke(BORDER); doc.rect(sx, y, sw, lineupH, "FD");
+  const drawLineup = (players, sx, sw, numBg, title, icon) => {
+    let ly = section(sx, y, sw, lineupBoxH, icon, title);
+    if (players.length===0) { setFont(8,"normal"); setTxt(GRAY); doc.text("—", sx+6, ly+5); return; }
     players.forEach((p,i) => {
       const ry2 = ly + i*8 + 1;
       if (i%2===0) { setFill([248,255,248]); doc.rect(sx+1, ry2-1.5, sw-2, 7.5, "F"); }
@@ -500,23 +539,25 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
     });
   };
 
-  drawLineup(matchData.starters, ML,       HALF, TITBG, GREEN, "Titulares",  "🟢");
-  drawLineup(matchData.subs,     ML+HALF+4, HALF, SUBBG, BLUE,  "Suplentes",  "🔵");
-  y += lineupH + 4;
+  drawLineup(matchData.starters, ML,       HALF, GREEN, "Titulares",  "🟢");
+  drawLineup(matchData.subs,     ML+HALF+4, HALF, BLUE,  "Suplentes",  "🔵");
+  y += lineupGapH;
 
   // ── CUERPO TÉCNICO ────────────────────────────────────
-  const staffH = matchData.staff.length*8 + 14;
-  let sty = secHeader(ML, y, CW, "👔", "Cuerpo Técnico");
-  setFill(WHITE); setStroke(BORDER); doc.rect(ML, y, CW, staffH, "FD");
-  matchData.staff.forEach((s,i) => {
-    const ry2 = sty + i*8 + 1;
-    setFont(8.5,"bold"); setTxt(BLACK);
-    doc.text(s.name, ML+5, ry2+2.5);
-    setFont(8.5,"normal"); setTxt(GRAY);
-    doc.text(`- ${s.role}`, ML+5+doc.getTextWidth(s.name)+3, ry2+2.5);
-    if (i < matchData.staff.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(ML+4, ry2+5.5, ML+CW-4, ry2+5.5); }
-  });
-  y += staffH + 5;
+  let sty = section(ML, y, CW, staffBoxH, "👔", "Cuerpo Técnico");
+  if (matchData.staff.length===0) {
+    setFont(8,"normal"); setTxt(GRAY); doc.text("—", ML+6, sty+5);
+  } else {
+    matchData.staff.forEach((s,i) => {
+      const ry2 = sty + i*8 + 1;
+      setFont(8.5,"bold"); setTxt(BLACK);
+      doc.text(s.name, ML+5, ry2+2.5);
+      setFont(8.5,"normal"); setTxt(GRAY);
+      doc.text(`- ${s.role}`, ML+5+doc.getTextWidth(s.name)+3, ry2+2.5);
+      if (i < matchData.staff.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(ML+4, ry2+5.5, ML+CW-4, ry2+5.5); }
+    });
+  }
+  y += staffGapH;
 
   // ── FOOTER ────────────────────────────────────────────
   setStroke(BORDER); doc.setLineWidth(0.4);
@@ -1144,7 +1185,6 @@ function ReportScreen({ matchData, score, events, t1Real, t2Real, onBack, onNewM
     </div>
   );
 }
-
 
 // ── Edit Match Screen ───────────────────────────────────
 function EditMatchScreen({ match, onSave, onClose }) {
@@ -2094,11 +2134,6 @@ function AccumReportScreen({ history, onBack }) {
     </div>
   );
 }
-
-
-// ── Edit Match Screen ───────────────────────────────────
-
-// ── Persistence ─────────────────────────────────────────
 
 // ── Main App ─────────────────────────────────────────────
 export default function App() {
