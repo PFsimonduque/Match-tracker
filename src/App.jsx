@@ -73,7 +73,7 @@ function useTimer() {
 
 // ── Minutes played (corrected formula) ─────────────────
 function calcMins(name, ptype, events, t1Real, t2Real) {
-  let entryClock = ptype==="titular" ? 1 : null;
+  let entryClock = ptype==="titular" ? 0 : null;
   let exitClock  = null;
   events.forEach(ev => {
     if (ev.type==="sub") { if (ev.in?.name===name) entryClock=ev.minute; if (ev.out?.name===name) exitClock=ev.minute; }
