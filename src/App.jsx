@@ -1570,8 +1570,8 @@ function EditMatchScreen({ match, onSave, onClose }) {
       {modal==="ym" && <MinuteInput autoMin={1} label="🟨 Minuto amarilla" onConfirm={onYM} onClose={()=>setModal(null)}/>}
       {modal==="rp" && <PlayerSelect players={allP} label="🟥 Roja a..." onSelect={onRP} onClose={()=>setModal(null)}/>}
       {modal==="rm" && <MinuteInput autoMin={1} label="🟥 Minuto roja" onConfirm={onRM} onClose={()=>setModal(null)}/>}
-      {modal==="so" && <PlayerSelect players={allP.filter(p=>p.type==="titular")} label="🔄 ¿Quién sale?" onSelect={onSO} onClose={()=>setModal(null)}/>}
-      {modal==="si" && <PlayerSelect players={allP.filter(p=>p.type==="suplente")} label="🔄 ¿Quién entra?" onSelect={onSI} onClose={()=>setModal(null)}/>}
+      {modal==="so" && <PlayerSelect players={allP} label="🔄 ¿Quién sale?" onSelect={onSO} onClose={()=>setModal(null)}/>}
+      {modal==="si" && <PlayerSelect players={allP} label="🔄 ¿Quién entra?" onSelect={onSI} onClose={()=>setModal(null)}/>}
     </div>
   );
 }
