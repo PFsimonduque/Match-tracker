@@ -1241,7 +1241,8 @@ function EditMatchScreen({ match, onSave, onClose }) {
 
   // Add sub
   const onSO = p => { setPending({out:p}); setModal("si"); };
-  const onSI = p => { addEv("sub",{out:pending.out,in:p,minute:pending.minute||0}); setPending({}); setModal(null); };
+  const onSI = p => { setPending(v=>({...v,in:p})); setModal("sm"); };
+  const onSM = min => { addEv("sub",{out:pending.out,in:pending.in,minute:min}); setPending({}); setModal(null); };
 
   const icon = t => ({goal:"⚽",yellow:"🟨",red:"🟥",injury:"🚑",sub:"🔄"}[t]||"•");
 
@@ -1572,6 +1573,7 @@ function EditMatchScreen({ match, onSave, onClose }) {
       {modal==="rm" && <MinuteInput autoMin={1} label="🟥 Minuto roja" onConfirm={onRM} onClose={()=>setModal(null)}/>}
       {modal==="so" && <PlayerSelect players={allP} label="🔄 ¿Quién sale?" onSelect={onSO} onClose={()=>setModal(null)}/>}
       {modal==="si" && <PlayerSelect players={allP} label="🔄 ¿Quién entra?" onSelect={onSI} onClose={()=>setModal(null)}/>}
+      {modal==="sm" && <MinuteInput autoMin={1} label="🔄 Minuto del cambio" onConfirm={onSM} onClose={()=>setModal(null)}/>}
     </div>
   );
 }
