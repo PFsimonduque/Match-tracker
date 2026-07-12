@@ -73,7 +73,7 @@ function useTimer() {
 
 // ── Minutes played (corrected formula) ─────────────────
 function calcMins(name, ptype, events, t1Real, t2Real) {
-  let entryClock = ptype==="titular" ? 0 : null;
+  let entryClock = ptype==="titular" ? 0 : null;  // 0 = arranca en el pitazo inicial (antes decía 1, y le restaba 1 minuto de más a todos los titulares)
   let exitClock  = null;
   events.forEach(ev => {
     if (ev.type==="sub") { if (ev.in?.name===name) entryClock=ev.minute; if (ev.out?.name===name) exitClock=ev.minute; }
@@ -1579,7 +1579,7 @@ function EditMatchScreen({ match, onSave, onClose }) {
 // ── Persistence ─────────────────────────────────────────
 const SK = "an_match_v5";
 const loadH = () => { try { return JSON.parse(localStorage.getItem(SK)||"[]"); } catch { return []; } };
-const saveH = r => { try { const h=loadH(); h.unshift({...r,id:Date.now()}); localStorage.setItem(SK,JSON.stringify(h.slice(0,20))); } catch {} };
+const saveH = r => { try { const h=loadH(); h.unshift({...r,id:Date.now()}); localStorage.setItem(SK,JSON.stringify(h.slice(0,100))); } catch {} };
 
 // ── Accumulated stats engine ────────────────────────────
 const RANGES = ["1-15","16-30","31-45","46-60","61-75","76-90","90+"];
@@ -2144,6 +2144,45 @@ export default function App() {
   const [showH, setShowH]       = useState(false);
   const [histDetail, setHistDetail] = useState(null);
   const [editMatch, setEditMatch] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const exportHistory = () => {
+    if (history.length===0) { alert("No hay partidos guardados para exportar."); return; }
+    const blob = new Blob([JSON.stringify(history, null, 2)], {type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Historial_AN_${new Date().toISOString().split("T")[0]}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportFile = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      try {
+        const imported = JSON.parse(ev.target.result);
+        if (!Array.isArray(imported)) throw new Error("no-array");
+        const existingIds = new Set(history.map(h=>h.id));
+        const merged = [...history];
+        let added = 0;
+        imported.forEach(m => {
+          if (m && m.id!=null && !existingIds.has(m.id)) { merged.push(m); existingIds.add(m.id); added++; }
+        });
+        merged.sort((a,b)=>(b.id||0)-(a.id||0));
+        const trimmed = merged.slice(0,100);
+        localStorage.setItem(SK, JSON.stringify(trimmed));
+        setHistory(trimmed);
+        alert(`Se importaron ${added} partido(s) nuevo(s). Total en este dispositivo: ${trimmed.length}.`);
+      } catch (err) {
+        alert("No se pudo leer ese archivo. Debe ser un .json exportado desde esta misma app (botón Exportar).");
+      }
+    };
+    reader.readAsText(f);
+    e.target.value = "";
+  };
+
 
   // Load jsPDF script once
   useEffect(() => {
@@ -2197,7 +2236,23 @@ export default function App() {
           display:"flex",alignItems:"center",justifyContent:"center"}}>
           <div style={{background:"white",borderRadius:16,padding:24,maxWidth:500,
             width:"90%",maxHeight:"80vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.4)"}}>
-            <h3 style={{margin:"0 0 14px",color:G.greenDark,fontFamily:"Georgia,serif",fontSize:19}}>📚 Partidos Guardados</h3>
+            <h3 style={{margin:"0 0 6px",color:G.greenDark,fontFamily:"Georgia,serif",fontSize:19}}>📚 Partidos Guardados</h3>
+            <p style={{margin:"0 0 12px",fontSize:11.5,color:"#888",lineHeight:1.4}}>
+              El historial vive solo en este dispositivo/navegador. Usa "Exportar" aquí y "Importar" en el otro dispositivo para juntar los partidos de ambos.
+            </p>
+            <input type="file" accept=".json,application/json" ref={fileInputRef} style={{display:"none"}} onChange={handleImportFile}/>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+              <button onClick={exportHistory}
+                style={{padding:"9px",background:G.greenDark,color:"white",border:"none",
+                  borderRadius:8,cursor:"pointer",fontFamily:"Georgia,serif",fontSize:13,fontWeight:"bold"}}>
+                ⬆️ Exportar (.json)
+              </button>
+              <button onClick={()=>fileInputRef.current && fileInputRef.current.click()}
+                style={{padding:"9px",background:"#003366",color:"white",border:"none",
+                  borderRadius:8,cursor:"pointer",fontFamily:"Georgia,serif",fontSize:13,fontWeight:"bold"}}>
+                ⬇️ Importar (.json)
+              </button>
+            </div>
             {history.length===0
               ? <p style={{color:"#aaa",fontSize:13}}>Sin partidos guardados</p>
               : history.map(h=>(
