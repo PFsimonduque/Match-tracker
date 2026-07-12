@@ -226,34 +226,35 @@ function HalfTimeModal({ onConfirm, onClose }) {
     </Overlay>
   );
 }
-// ── PDF Generator (altura dinámica, escudo con proxy CORS, íconos sin emoji, portada y gráfico corregidos) ─
+// ── PDF Generator (diseño profesional: tarjetas con acento de color, sin emojis, buen espaciado, sin textos superpuestos) ─
 
 async function generatePDF(matchData, score, events, t1Real, t2Real) {
   const { jsPDF } = window.jspdf;
   const PW = 210;
-  const ML = 11, MR = 11, MT = 10, MB = 10;
+  const ML = 13, MR = 13, MT = 12, MB = 12;
   const CW = PW - ML - MR;
-  const HALF = (CW - 4) / 2;
+  const GAP = 6;
+  const HALF = (CW - GAP) / 2;
 
   // Colors
-  const BG      = [0,30,0];
+  const BG      = [0,28,0];
   const GREEN   = [0,68,0];
-  const GBAR    = [0,170,68];
-  const GLIGHT  = [232,245,233];
+  const GBAR    = [0,163,68];
+  const GLIGHT  = [237,247,238];
   const BLUE    = [0,52,102];
-  const YELLOW  = [255,180,0];
-  const RED     = [170,0,0];
-  const GRAY    = [136,136,136];
+  const YELLOW  = [230,165,0];
+  const RED     = [176,26,26];
+  const GRAY    = [128,132,138];
+  const GRAY2   = [95,102,110];
   const WHITE   = [255,255,255];
-  const BLACK   = [26,26,26];
-  const BORDER  = [221,221,221];
+  const BLACK   = [24,24,26];
+  const BORDER  = [222,225,222];
 
-  // ── 1) Pre-calcular datos (se necesitan ANTES de crear el PDF,
-  //       para poder medir cuánta página hace falta) ─────────────
   const goals   = events.filter(e=>e.type==="goal");
   const yellows = events.filter(e=>e.type==="yellow");
   const reds    = events.filter(e=>e.type==="red");
   const subs    = events.filter(e=>e.type==="sub");
+  const cardRows = [...yellows.map(e=>({...e,card:"Y"})), ...reds.map(e=>({...e,card:"R"}))];
 
   const t1R = t1Real || 45;
   const t2R = t2Real || 45;
@@ -263,36 +264,45 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
   const maxMins = Math.max(...allWithMins.map(p=>p.mins), 1);
   const nBars = Math.max(allWithMins.length, 1);
 
-  // ── 2) Fórmulas de altura de cada sección (las mismas fórmulas se
-  //       usan para medir la página Y para dibujar, así siempre coinciden) ──
-  const COVER_H = 40;
-  const goalsBoxH  = 8 + (goals.length>0 ? goals.length*12+3 : 9);
-  const goalsGapH  = goalsBoxH + 4;
+  const HEADER_H   = 9;
+  const CONTENT_PAD = 2;
+  const CONTENT_START = HEADER_H + CONTENT_PAD;
 
-  const cardsSubsBoxH = Math.max(
-    Math.max((yellows.length+reds.length)*9+12, 18),
-    Math.max(subs.length*9+12, 18)
-  );
-  const cardsSubsGapH = cardsSubsBoxH + 4;
+  const COVER_H = 42;
+  const COVER_GAP = 6;
 
-  const CHART_TOP_PAD = 8;            // aire entre el título del gráfico y la barra más alta
-  const CHART_H = 58;                 // alto "físico" del gráfico (antes 50; +8 por el padding de arriba)
-  const CHART_BOX_H = CHART_H + 12;   // caja completa del gráfico
-  const chartGapH = CHART_H + 16;     // avance en Y tras el gráfico (deja 4mm libres)
+  const GOAL_ROW_H = 13;
+  const goalsContentH = goals.length>0 ? goals.length*GOAL_ROW_H + 5 : 11;
+  const goalsBoxH = CONTENT_START + goalsContentH;
+  const goalsGapH = goalsBoxH + GAP;
 
-  const lineupBoxH = Math.max(matchData.starters.length*8+14, matchData.subs.length*8+14);
-  const lineupGapH = lineupBoxH + 4;
+  const CARD_ROW_H = 10;
+  const cardsContentH = cardRows.length>0 ? cardRows.length*CARD_ROW_H + 4 : 11;
+  const subsContentH  = subs.length>0     ? subs.length*CARD_ROW_H + 4     : 11;
+  const cardsSubsBoxH = CONTENT_START + Math.max(cardsContentH, subsContentH);
+  const cardsSubsGapH = cardsSubsBoxH + GAP;
 
-  const staffBoxH = matchData.staff.length*8 + 14;
-  const staffGapH = staffBoxH + 5;
+  const CHART_TOP_PAD    = 9;
+  const CHART_INNER_H    = 27;
+  const CHART_BOTTOM_PAD = 23;
+  const CHART_BOX_H = CONTENT_START + CHART_TOP_PAD + CHART_INNER_H + CHART_BOTTOM_PAD;
+  const chartGapH = CHART_BOX_H + GAP;
 
-  const FOOTER_H = 12;
+  const LINEUP_ROW_H = 9;
+  const lineupContentH = n => n>0 ? n*LINEUP_ROW_H + 4 : 11;
+  const lineupBoxH = CONTENT_START + Math.max(lineupContentH(matchData.starters.length), lineupContentH(matchData.subs.length));
+  const lineupGapH = lineupBoxH + GAP;
 
-  const totalH = MT + COVER_H + 4 + goalsGapH + cardsSubsGapH + chartGapH
+  const STAFF_ROW_H = 9;
+  const staffContentH = matchData.staff.length>0 ? matchData.staff.length*STAFF_ROW_H + 4 : 11;
+  const staffBoxH = CONTENT_START + staffContentH;
+  const staffGapH = staffBoxH + GAP;
+
+  const FOOTER_H = 14;
+
+  const totalH = MT + COVER_H + COVER_GAP + goalsGapH + cardsSubsGapH + chartGapH
                + lineupGapH + staffGapH + FOOTER_H + MB;
 
-  // ── 3) Crear el PDF con la ALTURA EXACTA que necesita el contenido
-  //       (ya no es A4 fijo, así nunca se corta nada) ────────────
   const doc = new jsPDF({ orientation:"portrait", unit:"mm", format:[PW, totalH] });
 
   let y = MT;
@@ -301,38 +311,32 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
   const setStroke = c => doc.setDrawColor(...c);
   const setTxt    = c => doc.setTextColor(...c);
   const setFont   = (s,w="normal") => { doc.setFontSize(s); doc.setFont("helvetica",w); };
-  const rRect = (x,ry,w,h,r,fill=true,stroke=false) => doc.roundedRect(x,ry,w,h,r,r,fill&&stroke?"FD":fill?"F":"S");
 
-  // Dibuja PRIMERO la caja de contenido y DESPUÉS la barra del título
-  // encima, con un pequeño cuadro de color como "ícono" en vez de un
-  // emoji (jsPDF con la fuente helvetica estándar no soporta emojis:
-  // por eso salían símbolos raros tipo "Ø=ßâ" en los títulos).
-  const section = (rx,ry,w,h,iconColor,title) => {
-    setFill(WHITE); setStroke(BORDER); doc.setLineWidth(0.3);
-    doc.rect(rx,ry,w,h,"FD");
-    setFill(WHITE); setStroke(BORDER);
-    rRect(rx,ry,w,7,2);
-    setFill(iconColor);
-    doc.roundedRect(rx+4, ry+2.3, 3, 3, 0.6, 0.6, "F");
-    setFont(9.5,"bold"); setTxt(GREEN);
-    doc.text(title, rx+9.5, ry+4.8);
-    setStroke(GLIGHT); doc.setLineWidth(0.4);
-    doc.line(rx+4,ry+7,rx+w-4,ry+7);
-    return ry+8;
+  const section = (rx,ry,w,h,accentColor,title) => {
+    setFill(WHITE); setStroke(BORDER); doc.setLineWidth(0.35);
+    doc.roundedRect(rx, ry, w, h, 2.5, 2.5, "FD");
+    setFill(GLIGHT);
+    doc.rect(rx+0.4, ry+0.4, w-0.8, HEADER_H-0.4, "F");
+    setFill(accentColor);
+    doc.roundedRect(rx+4.5, ry+2.4, 1.8, HEADER_H-4.8, 0.9, 0.9, "F");
+    setFont(10.5,"bold"); setTxt(GREEN);
+    doc.text(title, rx+9, ry+HEADER_H/2+1.5);
+    setStroke(BORDER); doc.setLineWidth(0.35);
+    doc.line(rx+4.5, ry+HEADER_H, rx+w-4.5, ry+HEADER_H);
+    return ry + CONTENT_START;
+  };
+
+  const emptyState = (x,contentY,msg) => {
+    setFont(8.5,"italic"); setTxt(GRAY);
+    doc.text(msg, x, contentY+3.5);
   };
 
   const minBadge = (x,by,min,bg) => {
-    setFill(bg); doc.roundedRect(x,by-3.2,11,5,1.5,1.5,"F");
-    setFont(7.5,"bold"); setTxt(WHITE);
-    doc.text(`${min}'`, x+5.5, by+0.8, {align:"center"});
+    setFill(bg); doc.roundedRect(x,by-3.3,12,5.4,1.6,1.6,"F");
+    setFont(7.8,"bold"); setTxt(WHITE);
+    doc.text(`${min}'`, x+6, by+0.9, {align:"center"});
   };
 
-  // ── 4) Cargador de imágenes robusto (arregla el escudo AN) ─────
-  //    - Prueba la URL tal cual.
-  //    - Si el canvas se "mancha" por CORS (típico con Wikipedia), o
-  //      la imagen falla, reintenta a través de un proxy que sí
-  //      entrega cabeceras CORS válidas.
-  //    - Si de verdad no hay forma, sigue sin romper el PDF.
   const loadImg = (src) => new Promise(resolve => {
     if (!src) return resolve(null);
     const tryLoad = (url, onFail) => {
@@ -361,213 +365,205 @@ async function generatePDF(matchData, score, events, t1Real, t2Real) {
   const anImg = await loadImg(AN_SHIELD);
   const rvImg = matchData.rivalLogo ? await loadImg(matchData.rivalLogo) : null;
 
-  // ── COVER ─────────────────────────────────────────────
   setFill(BG);
   doc.roundedRect(ML, y, CW, COVER_H, 4, 4, "F");
 
-  // Tres columnas reales (izq: AN, centro: marcador, der: rival) —
-  // esto es lo que evita que el nombre del equipo se salga de la página.
   const colW    = CW/3;
   const leftCx  = ML + colW/2;
   const midCx   = ML + CW/2;
   const rightCx = ML + CW - colW/2;
 
-  if (anImg) doc.addImage(anImg,"PNG", leftCx-7, y+4, 14, 18);
-  setFont(8.5,"bold"); setTxt([0,204,0]);
-  doc.text("Atlético Nacional", leftCx, y+26, {align:"center", maxWidth: colW-4});
+  if (anImg) doc.addImage(anImg,"PNG", leftCx-7.5, y+5, 15, 19);
+  setFont(9,"bold"); setTxt([0,214,0]);
+  doc.text("Atlético Nacional", leftCx, y+28, {align:"center", maxWidth: colW-6});
 
-  if (rvImg) doc.addImage(rvImg,"PNG", rightCx-7, y+4, 14, 14);
-  setFont(8.5,"bold"); setTxt(WHITE);
-  doc.text(matchData.rival || "Rival", rightCx, y+26, {align:"center", maxWidth: colW-4});
+  if (rvImg) doc.addImage(rvImg,"PNG", rightCx-7.5, y+6, 15, 15);
+  setFont(9,"bold"); setTxt(WHITE);
+  doc.text(matchData.rival || "Rival", rightCx, y+28, {align:"center", maxWidth: colW-6});
 
-  setFont(26,"bold"); setTxt(WHITE);
-  doc.text(`${score[0]}  -  ${score[1]}`, midCx, y+17, {align:"center"});
-  setFont(7.5,"normal"); setTxt([170,170,170]);
-  doc.text("Resultado Final", midCx, y+22, {align:"center"});
+  setFont(28,"bold"); setTxt(WHITE);
+  doc.text(`${score[0]}   -   ${score[1]}`, midCx, y+18, {align:"center"});
+  setFont(7.8,"normal"); setTxt([175,175,175]);
+  doc.text("Resultado Final", midCx, y+23.5, {align:"center"});
 
-  setFont(7,"normal"); setTxt([180,255,180]);
+  setStroke([255,255,255]); doc.setLineWidth(0.15);
+  doc.line(midCx-CW/2+14, y+34.5, midCx+CW/2-14, y+34.5);
+
+  setFont(7.3,"normal"); setTxt([182,255,182]);
   const meta = [
     matchData.tournament && `Torneo: ${matchData.tournament}`,
     matchData.jornada    && `Jornada: ${matchData.jornada}`,
     matchData.date       && `Fecha: ${matchData.date}`,
     (t1R && t2R)          && `Duración: ${t1R}' + ${t2R}' = ${t1R+t2R}'`,
-  ].filter(Boolean).join("   |   ");
-  doc.text(meta, midCx, y+34, {align:"center", maxWidth: CW-10});
-  y += COVER_H + 4;
+  ].filter(Boolean).join("     |     ");
+  doc.text(meta, midCx, y+39.5, {align:"center", maxWidth: CW-14});
+  y += COVER_H + COVER_GAP;
 
-  // ── GOLES ─────────────────────────────────────────────
   let gy = section(ML, y, CW, goalsBoxH, GREEN, `Goles (${goals.length})`);
 
   if (goals.length===0) {
-    setFont(8,"normal"); setTxt(GRAY);
-    doc.text("Sin goles", ML+6, gy+5);
+    emptyState(ML+6, gy, "Sin goles registrados");
   } else {
     goals.forEach((g,i) => {
-      const rowY = gy + i*12 + 2;
-      minBadge(ML+4, rowY+3, g.minute, g.isOpponent ? RED : GREEN);
-      setFont(9,"bold"); setTxt(BLACK);
-      doc.text(g.isOpponent ? matchData.rival : (g.player?.name||""), ML+17, rowY+3.5);
-      if (!g.isOpponent && g.zone) {
-        setFont(8,"normal"); setTxt(GRAY);
-        doc.text(`- ${g.zone}`, ML+17 + doc.getTextWidth((g.player?.name||"")+"  "), rowY+3.5);
+      const rowY = gy + i*GOAL_ROW_H + 1;
+      minBadge(ML+5, rowY+3.2, g.minute, g.isOpponent ? RED : GREEN);
+      setFont(9.5,"bold"); setTxt(BLACK);
+      doc.text(g.isOpponent ? matchData.rival : (g.player?.name||""), ML+21, rowY+3.7);
+
+      if (!g.isOpponent) {
+        const parts = [];
+        if (g.zoneLabel || g.zone) parts.push(`Zona: ${g.zoneLabel || g.zone}`);
+        parts.push(g.assist ? `Asistencia: ${g.assist.name}` : "Sin asistencia");
+        setFont(8,"normal"); setTxt(GRAY2);
+        doc.text(parts.join("     ·     "), ML+21, rowY+8.6);
       }
-      setFont(7.5,"normal"); setTxt([50,68,85]);
-      const at = g.assist ? `Asist: ${g.assist.name}` : "Sin asistencia";
-      doc.text(at, ML+17, rowY+8);
-      if (i < goals.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(ML+4, rowY+10.5, ML+CW-4, rowY+10.5); }
+      if (i < goals.length-1) {
+        setStroke([236,236,236]); doc.setLineWidth(0.3);
+        doc.line(ML+5, rowY+11, ML+CW-5, rowY+11);
+      }
     });
   }
   y += goalsGapH;
 
-  // ── TARJETAS + CAMBIOS (dos columnas) ─────────────────
   let cy = section(ML, y, HALF, cardsSubsBoxH, YELLOW, "Tarjetas");
-  const cardRows = [...yellows.map(e=>({...e,card:"Y"})), ...reds.map(e=>({...e,card:"R"}))];
   if (cardRows.length===0) {
-    setFont(8,"normal"); setTxt(GRAY); doc.text("Sin tarjetas", ML+6, cy+5);
+    emptyState(ML+6, cy, "Sin tarjetas");
   } else {
     cardRows.forEach((e,i) => {
-      const ry2 = cy + i*9 + 2;
+      const ry2 = cy + i*CARD_ROW_H + 2.5;
       const bg = e.card==="Y" ? YELLOW : RED;
-      const fg = e.card==="Y" ? BLACK  : WHITE;
-      setFill(bg); doc.roundedRect(ML+4, ry2-3, 11, 5, 1.5,1.5,"F");
-      setFont(7.5,"bold"); setTxt(fg);
-      doc.text(`${e.minute}'`, ML+9.5, ry2+0.8, {align:"center"});
-      setFont(8.5,"normal"); setTxt(BLACK);
-      doc.text(`${e.card==="Y"?"Amarilla":"Roja"}: ${e.player?.name||""}`, ML+17, ry2+0.8);
-      if (i < cardRows.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(ML+4, ry2+4, ML+HALF-4, ry2+4); }
+      const fg = WHITE;
+      setFill(bg); doc.roundedRect(ML+5, ry2-3.3, 12, 5.4, 1.6,1.6,"F");
+      setFont(7.8,"bold"); setTxt(fg);
+      doc.text(`${e.minute}'`, ML+11, ry2+0.9, {align:"center"});
+      setFont(8.8,"normal"); setTxt(BLACK);
+      doc.text(`${e.card==="Y"?"Amarilla":"Roja"}: ${e.player?.name||""}`, ML+21, ry2+0.9);
+      if (i < cardRows.length-1) { setStroke([236,236,236]); doc.setLineWidth(0.3); doc.line(ML+5, ry2+4.8, ML+HALF-5, ry2+4.8); }
     });
   }
 
-  const SX = ML+HALF+4;
+  const SX = ML+HALF+GAP;
   let sy = section(SX, y, HALF, cardsSubsBoxH, BLUE, "Cambios");
   if (subs.length===0) {
-    setFont(8,"normal"); setTxt(GRAY); doc.text("Sin cambios", SX+6, sy+5);
+    emptyState(SX+6, sy, "Sin cambios");
   } else {
     subs.forEach((s,i) => {
-      const ry2 = sy + i*9 + 2;
-      setFill(BLUE); doc.roundedRect(SX+4, ry2-3, 11, 5, 1.5,1.5,"F");
-      setFont(7.5,"bold"); setTxt(WHITE);
-      doc.text(`${s.minute}'`, SX+9.5, ry2+0.8, {align:"center"});
-      setFont(8.5,"normal"); setTxt(RED);
-      doc.text(`Sale: ${s.out?.name||""}`, SX+17, ry2+0.8);
+      const ry2 = sy + i*CARD_ROW_H + 2.5;
+      setFill(BLUE); doc.roundedRect(SX+5, ry2-3.3, 12, 5.4, 1.6,1.6,"F");
+      setFont(7.8,"bold"); setTxt(WHITE);
+      doc.text(`${s.minute}'`, SX+11, ry2+0.9, {align:"center"});
+      setFont(8.6,"normal"); setTxt(RED);
+      doc.text(`Sale: ${s.out?.name||""}`, SX+21, ry2+0.9);
       const outW = doc.getTextWidth(`Sale: ${s.out?.name||""}`);
-      setFont(8.5,"normal"); setTxt(GRAY);
-      doc.text(" > ", SX+17+outW, ry2+0.8);
-      const arrW = doc.getTextWidth(" > ");
-      setFont(8.5,"normal"); setTxt(GREEN);
-      doc.text(`Entra: ${s.in?.name||""}`, SX+17+outW+arrW, ry2+0.8);
-      if (i < subs.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(SX+4, ry2+4, SX+HALF-4, ry2+4); }
+      setFont(8.6,"normal"); setTxt(GRAY);
+      doc.text("   >   ", SX+21+outW, ry2+0.9);
+      const arrW = doc.getTextWidth("   >   ");
+      setFont(8.6,"normal"); setTxt(GREEN);
+      doc.text(`Entra: ${s.in?.name||""}`, SX+21+outW+arrW, ry2+0.9);
+      if (i < subs.length-1) { setStroke([236,236,236]); doc.setLineWidth(0.3); doc.line(SX+5, ry2+4.8, SX+HALF-5, ry2+4.8); }
     });
   }
   y += cardsSubsGapH;
 
-  // ── MINUTOS JUGADOS ───────────────────────────────────
-  const CHART_ML = 16;
-  const chartW = CW - CHART_ML - 2;
+  const CHART_ML = 17;
+  const chartW = CW - CHART_ML - 3;
   const bw = chartW / nBars;
-  const iw = Math.min(bw*0.58, 9);
-  const pb = 20;
-  const chartInnerH = CHART_H - pb - 6 - CHART_TOP_PAD;
+  const iw = Math.min(bw*0.6, 9.5);
 
-  let mh = section(ML, y, CW, CHART_BOX_H, GREEN, `Minutos Jugados (${t1R+t2R}' — ${t1R}' + ${t2R}')`);
+  let mh = section(ML, y, CW, CHART_BOX_H, GREEN, `Minutos Jugados  (${t1R+t2R}' — ${t1R}' + ${t2R}')`);
 
-  const chartBaseY = mh + CHART_TOP_PAD + chartInnerH;
+  const chartBaseY = mh + CHART_TOP_PAD + CHART_INNER_H;
   const chartLeft  = ML + CHART_ML;
 
   [25,50,75,t1R+t2R].forEach(val => {
     if (val > maxMins+2) return;
-    const lineY = chartBaseY - (val/maxMins)*chartInnerH;
-    setStroke([224,224,224]); doc.setLineWidth(0.25);
+    const lineY = chartBaseY - (val/maxMins)*CHART_INNER_H;
+    setStroke([228,228,228]); doc.setLineWidth(0.25);
     doc.line(chartLeft, lineY, chartLeft+chartW-2, lineY);
-    setFont(5.5,"normal"); setTxt(GRAY);
-    doc.text(String(val), chartLeft-1, lineY+1, {align:"right"});
+    setFont(5.6,"normal"); setTxt(GRAY);
+    doc.text(String(val), chartLeft-1.5, lineY+1, {align:"right"});
   });
 
   allWithMins.forEach((p,i) => {
     const xc = chartLeft + (i+0.5)*bw;
     const xb = xc - iw/2;
-    const bh = (p.mins/maxMins)*chartInnerH;
+    const bh = (p.mins/maxMins)*CHART_INNER_H;
     const isTit = p.type==="titular";
     const bc = isTit ? GBAR : BLUE;
 
-    setFill(GLIGHT); doc.rect(xb, chartBaseY-chartInnerH, iw, chartInnerH, "F");
+    setFill(GLIGHT); doc.rect(xb, chartBaseY-CHART_INNER_H, iw, CHART_INNER_H, "F");
     setFill(bc); doc.rect(xb, chartBaseY-bh, iw, bh, "F");
-    setFont(6,"bold"); setTxt(isTit ? GREEN : BLUE);
-    doc.text(`${p.mins}'`, xc, chartBaseY-bh-1.5, {align:"center"});
+    setFont(6.2,"bold"); setTxt(isTit ? GREEN : BLUE);
+    doc.text(`${p.mins}'`, xc, chartBaseY-bh-1.6, {align:"center"});
     const num = p.number||"";
     if (num) {
       setFill(bc);
-      doc.roundedRect(xc-3.5, chartBaseY+1.5, 7, 4.5, 1,1,"F");
-      setFont(6,"bold"); setTxt(WHITE);
-      doc.text(num, xc, chartBaseY+4.8, {align:"center"});
+      doc.roundedRect(xc-3.6, chartBaseY+1.8, 7.2, 4.6, 1,1,"F");
+      setFont(6.2,"bold"); setTxt(WHITE);
+      doc.text(num, xc, chartBaseY+5.1, {align:"center"});
     }
     const parts = p.name.split(" ");
     const display = parts.length>1 ? `${parts[0][0]}. ${parts[parts.length-1]}` : p.name;
-    setFont(5.8,"bold"); setTxt(BLACK);
-    doc.text(display, xc, chartBaseY+9, {align:"center"});
+    setFont(5.9,"bold"); setTxt(BLACK);
+    doc.text(display, xc, chartBaseY+9.6, {align:"center"});
   });
 
   setStroke(GREEN); doc.setLineWidth(0.7);
   doc.line(chartLeft, chartBaseY, chartLeft+chartW-2, chartBaseY);
-  doc.line(chartLeft, chartBaseY-chartInnerH, chartLeft, chartBaseY);
+  doc.line(chartLeft, chartBaseY-CHART_INNER_H, chartLeft, chartBaseY);
 
-  // Leyenda — debajo de los nombres, sin encimarse
-  const legendY = chartBaseY + 20;
-  setFill(GBAR); doc.rect(ML+CW-30, legendY-2, 3, 3, "F");
-  setFont(6.5,"normal"); setTxt(BLACK); doc.text("Titular", ML+CW-26, legendY+0.5);
-  setFill(BLUE); doc.rect(ML+CW-17, legendY-2, 3, 3, "F");
-  doc.text("Suplente", ML+CW-13, legendY+0.5);
+  const legendY = chartBaseY + 18;
+  setFill(GBAR); doc.rect(ML+CW-32, legendY-2.2, 3.2, 3.2, "F");
+  setFont(6.8,"normal"); setTxt(BLACK); doc.text("Titular", ML+CW-27.5, legendY+0.5);
+  setFill(BLUE); doc.rect(ML+CW-16, legendY-2.2, 3.2, 3.2, "F");
+  doc.text("Suplente", ML+CW-11.5, legendY+0.5);
 
   y += chartGapH;
 
-  // ── ALINEACIÓN + SUPLENTES ────────────────────────────
-  const drawLineup = (players, sx, sw, numBg, title, iconColor) => {
-    let ly = section(sx, y, sw, lineupBoxH, iconColor, title);
-    if (players.length===0) { setFont(8,"normal"); setTxt(GRAY); doc.text("—", sx+6, ly+5); return; }
+  const drawLineup = (players, sx, sw, numBg, title, accentColor) => {
+    let ly = section(sx, y, sw, lineupBoxH, accentColor, title);
+    if (players.length===0) { emptyState(sx+6, ly, "Sin jugadores"); return; }
     players.forEach((p,i) => {
-      const ry2 = ly + i*8 + 1;
-      if (i%2===0) { setFill([248,255,248]); doc.rect(sx+1, ry2-1.5, sw-2, 7.5, "F"); }
+      const ry2 = ly + i*LINEUP_ROW_H + 1.5;
+      if (i%2===0) { setFill([248,251,248]); doc.rect(sx+2, ry2-1.8, sw-4, LINEUP_ROW_H-1, "F"); }
       if (p.number) {
-        setFill(numBg); doc.roundedRect(sx+3, ry2-1.2, 7.5, 5, 1,1,"F");
-        setFont(7,"bold"); setTxt(WHITE);
-        doc.text(p.number, sx+6.75, ry2+2.5, {align:"center"});
+        setFill(numBg); doc.roundedRect(sx+4, ry2-1.4, 8, 5.4, 1.2,1.2,"F");
+        setFont(7.2,"bold"); setTxt(WHITE);
+        doc.text(p.number, sx+8, ry2+2.7, {align:"center"});
       }
-      setFont(8.5,"normal"); setTxt(BLACK);
-      doc.text(p.name, sx+12.5, ry2+2.5);
+      setFont(8.8,"normal"); setTxt(BLACK);
+      doc.text(p.name, sx+14.5, ry2+2.7);
       if (p.pos) {
-        setFont(7.5,"bold"); setTxt(numBg);
-        doc.text(p.pos, sx+sw-4, ry2+2.5, {align:"right"});
+        setFont(7.6,"bold"); setTxt(numBg);
+        doc.text(p.pos, sx+sw-5, ry2+2.7, {align:"right"});
       }
     });
   };
 
   drawLineup(matchData.starters, ML,       HALF, GREEN, "Titulares",  GREEN);
-  drawLineup(matchData.subs,     ML+HALF+4, HALF, BLUE,  "Suplentes",  BLUE);
+  drawLineup(matchData.subs,     ML+HALF+GAP, HALF, BLUE,  "Suplentes",  BLUE);
   y += lineupGapH;
 
-  // ── CUERPO TÉCNICO ────────────────────────────────────
   let sty = section(ML, y, CW, staffBoxH, GREEN, "Cuerpo Técnico");
   if (matchData.staff.length===0) {
-    setFont(8,"normal"); setTxt(GRAY); doc.text("—", ML+6, sty+5);
+    emptyState(ML+6, sty, "Sin datos");
   } else {
     matchData.staff.forEach((s,i) => {
-      const ry2 = sty + i*8 + 1;
-      setFont(8.5,"bold"); setTxt(BLACK);
-      doc.text(s.name, ML+5, ry2+2.5);
-      setFont(8.5,"normal"); setTxt(GRAY);
-      doc.text(`- ${s.role}`, ML+5+doc.getTextWidth(s.name)+3, ry2+2.5);
-      if (i < matchData.staff.length-1) { setStroke([238,238,238]); doc.setLineWidth(0.3); doc.line(ML+4, ry2+5.5, ML+CW-4, ry2+5.5); }
+      const ry2 = sty + i*STAFF_ROW_H + 1.5;
+      setFont(8.8,"bold"); setTxt(BLACK);
+      doc.text(s.name, ML+6, ry2+2.7);
+      setFont(8.4,"normal"); setTxt(GRAY2);
+      doc.text(`—  ${s.role}`, ML+6+doc.getTextWidth(s.name)+3, ry2+2.7);
+      if (i < matchData.staff.length-1) { setStroke([236,236,236]); doc.setLineWidth(0.3); doc.line(ML+5, ry2+5.8, ML+CW-5, ry2+5.8); }
     });
   }
   y += staffGapH;
 
-  // ── FOOTER ────────────────────────────────────────────
   setStroke(BORDER); doc.setLineWidth(0.4);
   doc.line(ML, y, ML+CW, y);
-  setFont(8,"normal"); setTxt(GRAY);
-  doc.text("PF Simon Duque Villegas - Atletico Nacional", PW/2, y+5, {align:"center"});
+  setFont(8,"italic"); setTxt(GRAY);
+  doc.text("PF Simón Duque Villegas  ·  Atlético Nacional", PW/2, y+6, {align:"center"});
 
-  // Save
   const fname = `Informe_AN_vs_${matchData.rival.replace(/\s+/g,"_")}.pdf`;
   doc.save(fname);
 }
